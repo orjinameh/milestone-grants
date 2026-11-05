@@ -1,10 +1,10 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { calls } from "../src/lib/api";
+import { calls } from "../lib/api";
 import {
   fmt, isNative, makeEthCall, parseUnits, readGrant, readGrantCount, sendTx, short,
   type Config, type Eip1193, type GrantView,
-} from "../src/lib/chain";
+} from "../lib/chain";
 import GrantCard from "../components/GrantCard";
 
 type Msg = { text: string; cls: string };

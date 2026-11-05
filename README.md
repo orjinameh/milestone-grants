@@ -20,7 +20,7 @@ commit message, author and whether it was authored *before or after* the grant w
 - Not in scope: reviewer rejection votes (a stalled claim is resolved by the deadline + `reclaim`), governance tokens, upgradeability
 
 ## Web app (Next.js App Router, React, TypeScript)
-`app/`, `components/`, `public/config.json`; chain logic in `src/lib/`. Own dependency-free ABI encoder (`src/lib/abi.ts`, tested against the Solidity-docs vectors and
+`app/`, `components/`, `public/config.json`; chain logic in `lib/`. Own dependency-free ABI encoder (`lib/abi.ts`, tested against the Solidity-docs vectors and
 cross-checked against ethers). Shows empty/offline states when no registry is configured or the RPC is unreachable; never fake data.
 
 ## Run it

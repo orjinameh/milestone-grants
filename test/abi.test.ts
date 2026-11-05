@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { encodeCall, selectorOf, encodeParams, isDynamic } from "../src/lib/abi";
-import { bytesToHex } from "../src/lib/hex";
-import { lookupCommit } from "../src/lib/github";
+import { encodeCall, selectorOf, encodeParams, isDynamic } from "../lib/abi";
+import { bytesToHex } from "../lib/hex";
+import { lookupCommit } from "../lib/github";
 
 test("Solidity-docs vector: baz(uint32,bool)", () => {
   assert.equal(bytesToHex(selectorOf("baz(uint32,bool)")), "0xcdcd77c0");

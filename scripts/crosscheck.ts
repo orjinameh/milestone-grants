@@ -1,6 +1,6 @@
 // Proves the hand-written ABI encoder matches ethers for every call the UI makes.  Run: npx tsx scripts/crosscheck.ts
 import { Interface } from "ethers";
-import { calls, SIG } from "../src/lib/api";
+import { calls, SIG } from "../lib/api";
 const abi = new Interface([
   "function createGrant((address token,address recipient,uint64 deadline,uint8 threshold,string repo,address[] reviewers,uint128[] amounts) p) payable returns (uint256)",
   "function claimMilestone(uint256,uint256,bytes20,string)", "function approveMilestone(uint256,uint256)", "function reclaim(uint256)",

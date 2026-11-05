@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
-import { calls } from "../src/lib/api";
-import { fmt, isNative, type GrantView } from "../src/lib/chain";
+import { calls } from "../lib/api";
+import { fmt, isNative, type GrantView } from "../lib/chain";
 import MilestoneRow from "./MilestoneRow";
 
 interface Props {

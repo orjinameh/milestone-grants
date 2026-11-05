@@ -1,8 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
-import { calls } from "../src/lib/api";
-import { lookupCommit, timing, type CommitEvidence } from "../src/lib/github";
-import { fmt, STATUS, type GrantView } from "../src/lib/chain";
+import { calls } from "../lib/api";
+import { lookupCommit, timing, type CommitEvidence } from "../lib/github";
+import { fmt, STATUS, type GrantView } from "../lib/chain";
 
 interface Props {
   g: GrantView; index: number; symbol: string; decimals: number; account: string | null;
