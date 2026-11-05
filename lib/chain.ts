@@ -33,8 +33,11 @@ export function makeEthCall(cfg: Config, eth: Eip1193 | undefined, walletOnRight
     try {
       const r = await fetch(cfg.rpcUrl, { method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params }) });
+      if (!r.ok) throw new Error(`RPC returned HTTP ${r.status}`);
       const j = await r.json();
-      if (j.error) throw new Error(j.error.message);
+      if (j.error) throw new Error(j.error.message || "RPC error");
+      if (typeof j.result !== "string") throw new Error("RPC gave no result for eth_call");
+      if (j.result === "0x") throw new Error(`No contract found at ${cfg.registryAddress} on ${cfg.chainName} (deploy it, then set registryAddress)`);
       return j.result;
     } catch (e) {
       if (eth && walletOnRightChain) return eth.request({ method: "eth_call", params });
