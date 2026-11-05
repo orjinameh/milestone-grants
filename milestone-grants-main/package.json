@@ -1,0 +1,37 @@
+{
+  "name": "milestone-grants",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Milestone-based grant escrow on Portaldot, with git-commit evidence and M-of-N reviewer approval.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test:abi": "tsx --test test/abi.test.ts",
+    "crosscheck": "tsx scripts/crosscheck.ts",
+    "compile": "hardhat compile",
+    "test:contract": "hardhat test",
+    "deploy:portaldot": "hardhat run scripts/deploy.cjs --network portaldot"
+  },
+  "dependencies": {
+    "@polkadot/api": "^17.0.2",
+    "@polkadot/extension-dapp": "^0.64.1",
+    "@polkadot/keyring": "^14.0.3",
+    "@polkadot/util": "^14.0.3",
+    "@polkadot/util-crypto": "^14.0.3",
+    "next": "^14.2.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "ethers": "^6.13.0",
+    "hardhat": "^2.22.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
