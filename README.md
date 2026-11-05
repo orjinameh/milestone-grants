@@ -43,3 +43,9 @@ Three ways in, all giving the same account type: browser extension (desktop, or 
 ## Disclosure
 Runtime: Next.js and React only; the contract client has no third-party code. Dev tooling: Hardhat, ethers, TypeScript, tsx. Built with AI assistance (Claude).
 License: MIT
+
+## Deployment status
+
+The contract compiles to 5,782 bytes of deployed code (under the chain's 10,240-byte limit) and passes the full test suite (`npm run test:contract`, `npm run test:abi`).
+
+Testnet deployment on Portaldot V3 is blocked by the storage deposit: pallet-revive holds a refundable deposit per stored byte (0.06 tPOT/byte), which exceeds the faucet's 10 tPOT per 24h limit. The dry run fails with `revive.StorageDepositNotEnoughFunds`. The deploy script (`npm run deploy:portaldot`, `scripts/deploy-revive.mjs`) is ready. Once the deployer account (`5EF5BYAngjNb8pcE6Xsgi37Td1AsommDjcuj8PMKKCw2vhCg`) is funded, running it deploys the contract and sets `registryAddress` in `public/config.json` automatically.
