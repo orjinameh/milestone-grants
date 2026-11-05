@@ -1,12 +1,6 @@
 require("@nomicfoundation/hardhat-toolbox");
+// Settings other Portaldot V3 builders use: small code matters because deployed code is capped (~10 KB) and deposits scale with size.
 module.exports = {
-  solidity: { version: "0.8.24", settings: { optimizer: { enabled: true, runs: 200 }, evmVersion: "paris" } },
-  networks: {
-    portaldot: {
-      url: process.env.PORTALDOT_EVM_RPC || "https://test-evm-rpc-v3.portaldot.dev",
-      chainId: 420420777,
-      accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
-    },
-  },
+  solidity: { version: "0.8.24", settings: { viaIR: true, optimizer: { enabled: true, runs: 1 }, evmVersion: "cancun" } },
   paths: { sources: "contracts", tests: "test" },
 };
