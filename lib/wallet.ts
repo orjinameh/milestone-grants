@@ -5,18 +5,20 @@
 // Reads go through the public EVM RPC. Writes are signed as Substrate extrinsics (revive.call).
 import type { Config } from "./chain";
 
+
 export type LoginKind = "extension" | "keystore" | "both" | "info";
 export interface Wallet { kind: LoginKind; name: string; ss58: string; evm: string; send(to: string, data: string, value?: string): Promise<string> }
 export interface AccountInfo { address?: string; name?: string; ss58Format?: number }
 
 const APP = "Milestone Grants";
-/** Dynamic import with a few retries. Never reloads the page. */
+/** Lazy import. Retries only real chunk download failures; any other error is passed through untouched. */
 async function load<T>(f: () => Promise<T>): Promise<T> {
   for (let i = 0; ; i++) {
     try { return await f(); }
     catch (e) {
-      if (i < 3) { await new Promise((r) => setTimeout(r, 800 * (i + 1))); continue; }
-      throw new Error("Could not download the wallet code (network problem). Try again.");
+      const chunk = /Loading chunk|ChunkLoadError|Loading CSS chunk/i.test(String((e as Error)?.message ?? e));
+      if (!chunk || i >= 3) throw e;
+      await new Promise((r) => setTimeout(r, 800 * (i + 1)));
     }
   }
 }
@@ -72,12 +74,12 @@ async function makeWallet(kind: LoginKind, who: Signer, cfg: Config): Promise<Wa
 
 /** 1. Browser extension. */
 export async function loginExtension(cfg: Config): Promise<Wallet[]> {
-  const { web3Enable, web3Accounts } = await load(() => import("@polkadot/extension-dapp"));
+  const { web3Enable, web3Accounts, web3FromSource } = await load(() => import("@polkadot/extension-dapp"));
   const exts = await web3Enable(APP);
   if (!exts.length) throw new Error("No Substrate wallet extension found. Install one on a desktop browser (or use Orion on mobile).");
   const accounts = await web3Accounts({ ss58Format: cfg.ss58Format ?? 42 });
   if (!accounts.length) throw new Error("The extension has no accounts, or access was declined.");
-  const injector = await (await load(() => import("@polkadot/extension-dapp"))).web3FromSource(accounts[0].meta.source);
+  const injector = await web3FromSource(accounts[0].meta.source);
   return Promise.all(accounts.map((a) => makeWallet("extension", { address: a.address, name: a.meta.name ?? "Account", signer: injector.signer }, cfg)));
 }
 
