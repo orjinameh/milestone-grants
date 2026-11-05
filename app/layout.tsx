@@ -6,6 +6,8 @@ const display = Bricolage_Grotesque({ subsets: ["latin"], variable: "--font-disp
 const body = Instrument_Sans({ subsets: ["latin"], variable: "--font-body", display: "swap" });
 const mono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500"], variable: "--font-mono", display: "swap" });
 
+export const viewport = { width: "device-width", initialScale: 1, viewportFit: "cover" as const };
+
 export const metadata = {
   title: "Milestone Grants",
   description: "Fund builders in milestones on Portaldot. Funds release when the commit is real and reviewers approve.",

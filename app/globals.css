@@ -176,3 +176,48 @@ legend { font-size: 0.9rem; font-weight: 600; padding: 0; margin-bottom: 8px; }
 .dlg .row { display: flex; gap: 8px; flex-wrap: wrap; }
 .dlg input[type="password"], .dlg input[type="file"] { width: 100%; }
 .dlg ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+
+/* ---- responsive layout: phones, tablets, laptops, wide screens ---- */
+:root { --wrap: 1120px; --gutter: 20px; }
+@media (min-width: 1440px) { :root { --wrap: 1280px; --gutter: 32px; } .cols { grid-template-columns: minmax(0, 1fr) 420px; } }
+@media (max-width: 520px) { :root { --gutter: 14px; } }
+html { -webkit-text-size-adjust: 100%; }
+.bar { padding-top: env(safe-area-inset-top, 0px); }
+.bar-in, main { max-width: var(--wrap); padding-left: max(var(--gutter), env(safe-area-inset-left, 0px)); padding-right: max(var(--gutter), env(safe-area-inset-right, 0px)); }
+main { padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
+.bar-in { flex-wrap: wrap; row-gap: 8px; }
+.brand { min-width: 0; }
+.bar-r { flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
+.wallet { max-width: 100%; }
+.track-head > div { min-width: 0; }
+.parties { overflow-wrap: anywhere; }
+.detail-head { flex-wrap: wrap; }
+.line input { min-width: 0; }
+.rail { overflow-x: auto; padding: 4px; margin: -4px; -webkit-overflow-scrolling: touch; }
+.seg { flex-shrink: 0; }
+.toast-zone { bottom: max(18px, env(safe-area-inset-bottom, 0px)); }
+
+/* dialogs: readable in dark mode, never taller than the screen */
+.dlg { background: var(--surface); color: var(--ink); max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); overflow-y: auto; }
+.dlg label, .dlg p { overflow-wrap: anywhere; }
+.dlg .btn { width: 100%; }
+.dlg .row .btn { width: auto; flex: 1 1 auto; }
+
+@media (max-width: 640px) {
+  .bar-r { gap: 8px; }
+  .bar-r .btn { padding: 7px 11px; font-size: 0.85rem; }
+  .wallet { padding: 6px 10px; font-size: 0.8rem; }
+  .hero { padding: 28px 0 28px; }
+  .lede { font-size: 1.02rem; }
+  .panel { padding: 16px; border-radius: 12px; }
+  .track { padding: 22px 0 20px; }
+  .money strong { font-size: 1.6rem; }
+  .stamp { padding: 12px; gap: 10px; }
+  .stamp-links { flex-wrap: wrap; gap: 8px 16px; }
+  input, input.mono { font-size: 16px; } /* stops iOS zooming into focused fields */
+  .toast { max-width: 100%; }
+}
+@media (pointer: coarse) {
+  .icon { width: 40px; height: 40px; }
+  .btn, .choices button { min-height: 44px; }
+}
