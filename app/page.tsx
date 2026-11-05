@@ -1,7 +1,9 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { calls } from "../lib/api";
-import { fmt, isNative, makeEthCall, parseUnits, readGrant, readGrantCount, sendTx, short, type Config, type Eip1193, type GrantView } from "../lib/chain";
+import { fmt, isNative, makeEthCall, parseUnits, readGrant, readGrantCount, short, type Config, type GrantView } from "../lib/chain";
+import { toEvm, type Wallet } from "../lib/wallet";
+import LoginDialog from "../components/LoginDialog";
 import GrantTrack from "../components/GrantTrack";
 import NewGrant, { type NewGrantParams } from "../components/NewGrant";
 import { Mark } from "../components/Icons";
@@ -13,9 +15,10 @@ const ZERO = "0x" + "00".repeat(20);
 
 export default function Page() {
   const [cfg, setCfg] = useState<Config | null>(null);
-  const [eth, setEth] = useState<Eip1193 | undefined>();
-  const [account, setAccount] = useState<string | null>(null);
-  const [chainOk, setChainOk] = useState(false);
+  const [wallet, setWallet] = useState<Wallet | null>(null);
+  const [loginOpen, setLoginOpen] = useState(false);
+  const account = wallet?.evm ?? null;
+  const chainOk = !!wallet;
   const [grants, setGrants] = useState<GrantView[]>([]);
   const [list, setList] = useState<ListState>({ kind: "loading" });
   const [toast, setToast] = useState<Toast>(null);
@@ -27,7 +30,6 @@ export default function Page() {
   useEffect(() => { if (toast?.tone === "ok") { const h = setTimeout(() => setToast(null), 6000); return () => clearTimeout(h); } }, [toast]);
 
   useEffect(() => {
-    setEth((window as any).ethereum);
     fetch("/config.json", { cache: "no-store" }).then((r) => r.json()).then(setCfg).catch(() => setConfigErr(true));
   }, []);
 
@@ -35,7 +37,7 @@ export default function Page() {
     if (!cfg) return;
     if (!cfg.registryAddress) { setGrants([]); return setList({ kind: "unconfigured" }); }
     try {
-      const call = makeEthCall(cfg, eth, chainOk);
+      const call = makeEthCall(cfg, undefined, false);
       const n = await readGrantCount(call);
       if (n === 0) { setGrants([]); return setList({ kind: "empty" }); }
       const ids: number[] = [];
@@ -46,32 +48,13 @@ export default function Page() {
       setGrants([]);
       setList({ kind: "error", text: (e as Error).message });
     }
-  }, [cfg, eth, chainOk, account]);
+  }, [cfg, account]);
   useEffect(() => { void load(); }, [load]);
-
-  const connect = async () => {
-    if (!eth || !cfg) return;
-    try {
-      const [a] = await eth.request({ method: "eth_requestAccounts" });
-      const id = parseInt(await eth.request({ method: "eth_chainId" }), 16);
-      setAccount(a); setChainOk(id === cfg.chainId);
-      eth.on?.("chainChanged", () => location.reload());
-      eth.on?.("accountsChanged", () => location.reload());
-    } catch { say({ text: "The wallet connection was declined.", tone: "bad" }); }
-  };
-  const switchNetwork = async () => {
-    if (!eth || !cfg) return;
-    try {
-      await eth.request({ method: "wallet_addEthereumChain", params: [{ chainId: "0x" + cfg.chainId.toString(16), chainName: cfg.chainName,
-        rpcUrls: [cfg.rpcUrl], nativeCurrency: { name: cfg.nativeSymbol, symbol: cfg.nativeSymbol, decimals: cfg.nativeDecimals } }] });
-      await connect();
-    } catch { say({ text: "The network switch was declined.", tone: "bad" }); }
-  };
 
   const run: Run = async (data, label) => {
     if (!cfg) return;
     say({ text: label.pending, tone: "info" });
-    try { await sendTx(eth, account, cfg.registryAddress, data); } catch (e) { say({ text: (e as Error).message, tone: "bad" }); throw e; }
+    try { await wallet!.send(cfg.registryAddress, data); } catch (e) { say({ text: (e as Error).message, tone: "bad" }); throw e; }
     say({ text: label.done, tone: "ok" });
     await load();
   };
@@ -86,18 +69,19 @@ export default function Page() {
       const native = isNative(token);
       const deadline = Math.floor(Date.now() / 1000) + p.days * 86400;
       if (!native) {
-        say({ text: "Approve the token transfer in your wallet…", tone: "info" });
-        await sendTx(eth, account, token, calls.erc20Approve(cfg.registryAddress, total));
+        say({ text: "Approve the token transfer (sign with your account)…", tone: "info" });
+        await wallet!.send(token, calls.erc20Approve(cfg.registryAddress, total));
       }
-      say({ text: "Confirm the grant in your wallet…", tone: "info" });
-      await sendTx(eth, account, cfg.registryAddress, calls.createGrant({ token, recipient: p.recipient, deadline, threshold: p.threshold, repo: p.repo, reviewers: p.reviewers, amounts }), native ? total : "0");
+      say({ text: "Sign the grant with your account…", tone: "info" });
+      const recipient = await toEvm(p.recipient, cfg), reviewers = await Promise.all(p.reviewers.map((r) => toEvm(r, cfg)));
+      await wallet!.send(cfg.registryAddress, calls.createGrant({ token, recipient, deadline, threshold: p.threshold, repo: p.repo, reviewers, amounts }), native ? total : "0");
       say({ text: "Grant funded.", tone: "ok" });
       await load();
     } catch (e) { say({ text: (e as Error).message, tone: "bad" }); }
     setBusy(false);
   };
 
-  const blocker = !cfg ? "Loading…" : !cfg.registryAddress ? "The registry address is not set in public/config.json." : !eth ? "Install a wallet such as MetaMask to fund a grant." : !account ? "Connect your wallet to fund a grant." : !chainOk ? `Switch your wallet to ${cfg.chainName}.` : null;
+  const blocker = !cfg ? "Loading…" : !cfg.registryAddress ? "The registry address is not set in public/config.json." : !wallet ? "Log in to fund a grant." : null;
 
   const totals = useMemo(() => {
     if (!cfg) return null;
@@ -113,10 +97,9 @@ export default function Page() {
           <span className="brand"><Mark /> Milestone Grants</span>
           <nav className="bar-r" aria-label="Wallet">
             <a className="bar-link" href="#new">New grant</a>
-            {account && !chainOk && cfg && <button className="btn btn-quiet" onClick={switchNetwork}>Switch to {cfg.chainName}</button>}
-            {account
-              ? <span className="wallet" title={account}><i className={chainOk ? "dot ok" : "dot bad"} />{short(account)}</span>
-              : <button className="btn" onClick={connect} disabled={!eth}>{eth ? "Connect wallet" : "No wallet found"}</button>}
+            {wallet
+              ? <span className="wallet" title={`${wallet.ss58}\nEVM ${wallet.evm}`}><i className="dot ok" />{short(wallet.ss58)}</span>
+              : <button className="btn" onClick={() => setLoginOpen(true)} disabled={!cfg}>Log in</button>}
           </nav>
         </div>
       </header>
@@ -149,6 +132,7 @@ export default function Page() {
         </div>
       </main>
 
+      {loginOpen && cfg && <LoginDialog cfg={cfg} onClose={() => setLoginOpen(false)} onWallet={(w) => { setWallet(w); setLoginOpen(false); }} />}
       <div className="toast-zone" aria-live="polite">
         {toast && <p className={`toast toast-${toast.tone}`}>{toast.text}<button className="icon" aria-label="Dismiss" onClick={() => setToast(null)}>×</button></p>}
       </div>

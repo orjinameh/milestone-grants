@@ -4,5 +4,7 @@
   "chainName": "Portaldot V3 Testnet",
   "rpcUrl": "https://test-evm-rpc-v3.portaldot.dev",
   "nativeSymbol": "POT",
-  "nativeDecimals": 18
+  "nativeDecimals": 18,
+  "wsUrl": "wss://test-node-v3.portaldot.dev",
+  "ss58Format": 42
 }

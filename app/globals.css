@@ -169,3 +169,10 @@ legend { font-size: 0.9rem; font-weight: 600; padding: 0; margin-bottom: 8px; }
 }
 @media (max-width: 520px) { .bar-link { display: none; } .seg { min-width: 56px; padding: 7px 8px; } .seg-amt { font-size: 0.92rem; } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+.dlg-back { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: grid; place-items: center; z-index: 50; padding: 16px; }
+.dlg { background: var(--bg, #fff); color: inherit; border: 1px solid rgba(128,128,128,.35); border-radius: 12px; padding: 20px; width: min(440px, 100%); display: grid; gap: 12px; }
+.dlg h2 { margin: 0; }
+.dlg .row { display: flex; gap: 8px; flex-wrap: wrap; }
+.dlg input[type="password"], .dlg input[type="file"] { width: 100%; }
+.dlg ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }

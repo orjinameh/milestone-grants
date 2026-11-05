@@ -36,6 +36,10 @@ npm run dev                      # http://localhost:3000  (or `npm run build && 
 ```
 Network: chain ID `420420777`, EVM RPC `https://test-evm-rpc-v3.portaldot.dev`.
 
+## Login (Portaldot Substrate accounts, address starts with 5)
+Three ways in, all giving the same account type: browser extension (desktop, or Orion on mobile), keystore JSON + password, and the account info JSON alongside the keystore. Keys are decrypted in the browser only. Writes are signed as `revive.call` extrinsics (Portaldot V3 runs pallet-revive), after a `reviveApi.call` dry run for weight and deposit limits. A `5…` account acts on the contract as the address keccak256(publicKey)[12..].
+`public/config.json` holds `wsUrl` (`wss://test-node-v3.portaldot.dev`). Recipients and reviewers may be entered as `5…` or `0x…`.
+
 ## Disclosure
 Runtime: Next.js and React only; the contract client has no third-party code. Dev tooling: Hardhat, ethers, TypeScript, tsx. Built with AI assistance (Claude).
 License: MIT

@@ -1,7 +1,7 @@
 import { calls } from "./api";
 import { words, wBig, wAddr, wBytes20, decodeString } from "./abi";
 
-export interface Config { registryAddress: string; chainId: number; chainName: string; rpcUrl: string; nativeSymbol: string; nativeDecimals: number }
+export interface Config { registryAddress: string; chainId: number; chainName: string; rpcUrl: string; nativeSymbol: string; nativeDecimals: number; wsUrl?: string; ss58Format?: number }
 export interface Eip1193 { request(a: { method: string; params?: unknown[] }): Promise<any>; on?(e: string, f: () => void): void }
 export interface MilestoneView { amount: bigint; status: number; approvals: number; commit: string; evidence: string; viewerVoted?: boolean }
 export interface GrantView {
@@ -67,7 +67,7 @@ export async function readGrant(call: EthCall, id: number, viewer?: string | nul
 }
 
 export async function sendTx(eth: Eip1193 | undefined, from: string | null, to: string, data: string, value?: string): Promise<string> {
-  if (!eth || !from) throw new Error("Connect a wallet first.");
+  if (!eth || !from) throw new Error("Log in first.");
   const tx = await eth.request({ method: "eth_sendTransaction",
     params: [{ from, to, data, ...(value && value !== "0" ? { value: "0x" + BigInt(value).toString(16) } : {}) }] });
   for (let i = 0; i < 90; i++) {
@@ -78,7 +78,8 @@ export async function sendTx(eth: Eip1193 | undefined, from: string | null, to: 
   throw new Error("Timed out waiting for confirmation (tx " + tx + ")");
 }
 
-export const isAddress = (a: string) => /^0x[0-9a-fA-F]{40}$/.test(a.trim());
+export const isSs58 = (a: string) => /^5[1-9A-HJ-NP-Za-km-z]{46,47}$/.test(a.trim());
+export const isAddress = (a: string) => /^0x[0-9a-fA-F]{40}$/.test(a.trim()) || isSs58(a);
 export const isRepo = (r: string) => /^[\w.-]+\/[\w.-]+$/.test(r.trim());
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 export function timeLeft(deadline: number, now: number): string {
