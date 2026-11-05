@@ -10,15 +10,22 @@ export interface Wallet { kind: LoginKind; name: string; ss58: string; evm: stri
 export interface AccountInfo { address?: string; name?: string; ss58Format?: number }
 
 const APP = "Milestone Grants";
-/** Dynamic import that survives a stale deployment: on a missing chunk, reload once to fetch the new build. */
+/** Dynamic import that survives flaky networks and stale deployments: retry, then reload once. */
 async function load<T>(f: () => Promise<T>): Promise<T> {
-  try { const m = await f(); try { sessionStorage.removeItem("chunk-retry"); } catch {} return m; }
-  catch (e) {
-    if (/Loading chunk|ChunkLoadError|dynamically imported|Failed to fetch dynamically/i.test(String((e as Error)?.message ?? e))) {
+  const chunkErr = (e: unknown) => /Loading chunk|ChunkLoadError|dynamically imported|Failed to fetch dynamically/i.test(String((e as Error)?.message ?? e));
+  for (let i = 0; ; i++) {
+    try { const m = await f(); try { sessionStorage.removeItem("chunk-retry"); } catch {} return m; }
+    catch (e) {
+      if (!chunkErr(e)) throw e;
+      if (i < 3) { await new Promise((r) => setTimeout(r, 800 * (i + 1))); continue; }
       try { if (!sessionStorage.getItem("chunk-retry")) { sessionStorage.setItem("chunk-retry", "1"); location.reload(); return new Promise<T>(() => {}); } } catch {}
+      throw new Error("Could not download the wallet code (network problem). Check your connection and try again.");
     }
-    throw e;
   }
+}
+/** Start downloading the wallet libraries early so login is instant and failures retry in the background. */
+export function preload() {
+  void Promise.allSettled([load(() => import("@polkadot/util-crypto")), load(() => import("@polkadot/keyring")), load(() => import("@polkadot/extension-dapp")), load(() => import("@polkadot/api"))]);
 }
 const rpc = async (url: string, method: string, params: unknown[]) => {
   const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });

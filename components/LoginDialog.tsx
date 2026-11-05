@@ -1,7 +1,7 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Config } from "../lib/chain";
-import { loginExtension, loginFiles, type Wallet } from "../lib/wallet";
+import { loginExtension, loginFiles, preload, type Wallet } from "../lib/wallet";
 
 type Tab = "extension" | "keystore";
 const readFile = (f: File) => f.text();
@@ -13,6 +13,7 @@ export default function LoginDialog({ cfg, onWallet, onClose }: { cfg: Config; o
   const [password, setPassword] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  useEffect(() => { preload(); }, []);
   const guard = async (fn: () => Promise<void>) => { setErr(""); setBusy(true); try { await fn(); } catch (e) { setErr((e as Error).message); } setBusy(false); };
 
   return (
