@@ -1,13 +1,14 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { calls } from "../lib/api";
-import {
-  fmt, isNative, makeEthCall, parseUnits, readGrant, readGrantCount, sendTx, short,
-  type Config, type Eip1193, type GrantView,
-} from "../lib/chain";
-import GrantCard from "../components/GrantCard";
+import { fmt, isNative, makeEthCall, parseUnits, readGrant, readGrantCount, sendTx, short, type Config, type Eip1193, type GrantView } from "../lib/chain";
+import GrantTrack from "../components/GrantTrack";
+import NewGrant, { type NewGrantParams } from "../components/NewGrant";
+import { Mark } from "../components/Icons";
+import type { Run } from "../components/MilestoneDetail";
 
-type Msg = { text: string; cls: string };
+type Toast = { text: string; tone: "ok" | "bad" | "info" } | null;
+type ListState = { kind: "loading" | "unconfigured" | "empty" | "error" | "ready"; text?: string };
 const ZERO = "0x" + "00".repeat(20);
 
 export default function Page() {
@@ -15,38 +16,37 @@ export default function Page() {
   const [eth, setEth] = useState<Eip1193 | undefined>();
   const [account, setAccount] = useState<string | null>(null);
   const [chainOk, setChainOk] = useState(false);
-  const [net, setNet] = useState<Msg>({ text: "Loading…", cls: "" });
-  const [list, setList] = useState<Msg>({ text: "Loading grants…", cls: "" });
   const [grants, setGrants] = useState<GrantView[]>([]);
-  const [create, setCreate] = useState<Msg>({ text: "", cls: "" });
+  const [list, setList] = useState<ListState>({ kind: "loading" });
+  const [toast, setToast] = useState<Toast>(null);
   const [busy, setBusy] = useState(false);
-  const [form, setForm] = useState({ recipient: "", repo: "", amounts: "", reviewers: "", threshold: "1", days: "14", token: "" });
+  const [configErr, setConfigErr] = useState(false);
   const now = Math.floor(Date.now() / 1000);
+
+  const say = useCallback((t: Toast) => { setToast(t); }, []);
+  useEffect(() => { if (toast?.tone === "ok") { const h = setTimeout(() => setToast(null), 6000); return () => clearTimeout(h); } }, [toast]);
 
   useEffect(() => {
     setEth((window as any).ethereum);
-    fetch("/config.json", { cache: "no-store" }).then((r) => r.json()).then((c: Config) => {
-      setCfg(c);
-      setNet({ text: (window as any).ethereum ? "Wallet not connected." : "No wallet detected. You can browse grants, but need a wallet (e.g. MetaMask) to act.", cls: (window as any).ethereum ? "" : "warn" });
-    }).catch(() => setNet({ text: "Could not load config.json", cls: "bad" }));
+    fetch("/config.json", { cache: "no-store" }).then((r) => r.json()).then(setCfg).catch(() => setConfigErr(true));
   }, []);
 
   const load = useCallback(async () => {
     if (!cfg) return;
-    if (!cfg.registryAddress) { setGrants([]); return setList({ text: "Registry address not configured yet (public/config.json). Nothing to show.", cls: "warn" }); }
+    if (!cfg.registryAddress) { setGrants([]); return setList({ kind: "unconfigured" }); }
     try {
       const call = makeEthCall(cfg, eth, chainOk);
       const n = await readGrantCount(call);
-      if (n === 0) { setGrants([]); return setList({ text: "No grants on-chain yet. Create the first one above.", cls: "" }); }
+      if (n === 0) { setGrants([]); return setList({ kind: "empty" }); }
       const ids: number[] = [];
       for (let id = n - 1; id >= Math.max(0, n - 20); id--) ids.push(id);
-      setGrants(await Promise.all(ids.map((id) => readGrant(call, id))));
-      setList({ text: `${n} grant${n === 1 ? "" : "s"} on-chain.`, cls: "" });
+      setGrants(await Promise.all(ids.map((id) => readGrant(call, id, account))));
+      setList({ kind: "ready" });
     } catch (e) {
       setGrants([]);
-      setList({ text: `Could not read the chain (${(e as Error).message}). Check the RPC and registry address.`, cls: "bad" });
+      setList({ kind: "error", text: (e as Error).message });
     }
-  }, [cfg, eth, chainOk]);
+  }, [cfg, eth, chainOk, account]);
   useEffect(() => { void load(); }, [load]);
 
   const connect = async () => {
@@ -55,9 +55,9 @@ export default function Page() {
       const [a] = await eth.request({ method: "eth_requestAccounts" });
       const id = parseInt(await eth.request({ method: "eth_chainId" }), 16);
       setAccount(a); setChainOk(id === cfg.chainId);
-      setNet({ text: `${short(a)} on chain ${id}${id === cfg.chainId ? "" : " — wrong network"}`, cls: id === cfg.chainId ? "ok" : "bad" });
       eth.on?.("chainChanged", () => location.reload());
-    } catch { setNet({ text: "Wallet connection rejected.", cls: "bad" }); }
+      eth.on?.("accountsChanged", () => location.reload());
+    } catch { say({ text: "The wallet connection was declined.", tone: "bad" }); }
   };
   const switchNetwork = async () => {
     if (!eth || !cfg) return;
@@ -65,88 +65,93 @@ export default function Page() {
       await eth.request({ method: "wallet_addEthereumChain", params: [{ chainId: "0x" + cfg.chainId.toString(16), chainName: cfg.chainName,
         rpcUrls: [cfg.rpcUrl], nativeCurrency: { name: cfg.nativeSymbol, symbol: cfg.nativeSymbol, decimals: cfg.nativeDecimals } }] });
       await connect();
-    } catch { setNet({ text: "Network switch rejected.", cls: "bad" }); }
+    } catch { say({ text: "The network switch was declined.", tone: "bad" }); }
   };
 
-  const run = async (data: string) => {
+  const run: Run = async (data, label) => {
     if (!cfg) return;
-    await sendTx(eth, account, cfg.registryAddress, data);
+    say({ text: label.pending, tone: "info" });
+    try { await sendTx(eth, account, cfg.registryAddress, data); } catch (e) { say({ text: (e as Error).message, tone: "bad" }); throw e; }
+    say({ text: label.done, tone: "ok" });
     await load();
   };
 
-  const split = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
-  const totalHint = useMemo(() => {
-    if (!cfg) return "";
-    try {
-      const amts = split(form.amounts);
-      if (!amts.length) return "";
-      const t = amts.reduce((s, a) => s + BigInt(parseUnits(a, cfg.nativeDecimals)), 0n);
-      return `Total locked: ${fmt(t, cfg.nativeDecimals)} ${form.token.trim() ? "token units (assumes 18 decimals)" : cfg.nativeSymbol}`;
-    } catch { return ""; }
-  }, [form.amounts, form.token, cfg]);
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const create = async (p: NewGrantParams) => {
     if (!cfg) return;
     setBusy(true);
     try {
-      const amounts = split(form.amounts).map((a) => parseUnits(a, cfg.nativeDecimals));
+      const amounts = p.amounts.map((a) => parseUnits(a, cfg.nativeDecimals));
       const total = amounts.reduce((s, a) => s + BigInt(a), 0n).toString();
-      const token = form.token.trim() || ZERO;
+      const token = p.token || ZERO;
       const native = isNative(token);
-      const deadline = Math.floor(Date.now() / 1000) + Math.round(Number(form.days) * 86400);
+      const deadline = Math.floor(Date.now() / 1000) + p.days * 86400;
       if (!native) {
-        setCreate({ text: "Step 1/2: approve the token transfer in your wallet…", cls: "" });
+        say({ text: "Approve the token transfer in your wallet…", tone: "info" });
         await sendTx(eth, account, token, calls.erc20Approve(cfg.registryAddress, total));
       }
-      setCreate({ text: native ? "Confirm the transaction in your wallet…" : "Step 2/2: confirm grant creation…", cls: "" });
-      const tx = await sendTx(eth, account, cfg.registryAddress, calls.createGrant({
-        token, recipient: form.recipient.trim(), deadline, threshold: Number(form.threshold), repo: form.repo.trim(),
-        reviewers: split(form.reviewers), amounts }), native ? total : "0");
-      setCreate({ text: `Grant created. tx ${tx}`, cls: "ok" });
+      say({ text: "Confirm the grant in your wallet…", tone: "info" });
+      await sendTx(eth, account, cfg.registryAddress, calls.createGrant({ token, recipient: p.recipient, deadline, threshold: p.threshold, repo: p.repo, reviewers: p.reviewers, amounts }), native ? total : "0");
+      say({ text: "Grant funded.", tone: "ok" });
       await load();
-    } catch (err) { setCreate({ text: (err as Error).message, cls: "bad" }); }
+    } catch (e) { say({ text: (e as Error).message, tone: "bad" }); }
     setBusy(false);
   };
 
-  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [k]: e.target.value });
+  const blocker = !cfg ? "Loading…" : !cfg.registryAddress ? "The registry address is not set in public/config.json." : !eth ? "Install a wallet such as MetaMask to fund a grant." : !account ? "Connect your wallet to fund a grant." : !chainOk ? `Switch your wallet to ${cfg.chainName}.` : null;
+
+  const totals = useMemo(() => {
+    if (!cfg) return null;
+    const native = grants.filter((g) => isNative(g.token));
+    return { released: native.reduce((s, g) => s + g.released, 0n), count: grants.length };
+  }, [grants, cfg]);
 
   return (
-    <main>
-      <header>
-        <h1>Milestone Grants</h1>
-        <p className="sub">Fund builders milestone by milestone on Portaldot. Each milestone is claimed with a real git commit, approved by a reviewer panel, and paid out on-chain automatically.</p>
-        <p className={`status ${net.cls}`}>{net.text}</p>
-        <div className="row">
-          <button onClick={connect} disabled={!eth}>Connect wallet</button>
-          {account && !chainOk && <button className="ghost" onClick={switchNetwork}>Switch to Portaldot testnet</button>}
+    <>
+      <a className="skip" href="#grants">Skip to grants</a>
+      <header className="bar">
+        <div className="bar-in">
+          <span className="brand"><Mark /> Milestone Grants</span>
+          <nav className="bar-r" aria-label="Wallet">
+            <a className="bar-link" href="#new">New grant</a>
+            {account && !chainOk && cfg && <button className="btn btn-quiet" onClick={switchNetwork}>Switch to {cfg.chainName}</button>}
+            {account
+              ? <span className="wallet" title={account}><i className={chainOk ? "dot ok" : "dot bad"} />{short(account)}</span>
+              : <button className="btn" onClick={connect} disabled={!eth}>{eth ? "Connect wallet" : "No wallet found"}</button>}
+          </nav>
         </div>
       </header>
 
-      <section className="card">
-        <h2>Create a grant</h2>
-        <form onSubmit={submit}>
-          <label>Recipient address<input value={form.recipient} onChange={set("recipient")} placeholder="0x…" required /></label>
-          <label>GitHub repo (owner/name)<input value={form.repo} onChange={set("repo")} placeholder="owner/repo" required /></label>
-          <label>Milestone amounts (comma separated)<input value={form.amounts} onChange={set("amounts")} placeholder="1, 2, 2" required /></label>
-          <label>Reviewers (comma separated addresses)<input value={form.reviewers} onChange={set("reviewers")} placeholder="0x…, 0x…" required /></label>
-          <label>Approvals needed<input type="number" min={1} value={form.threshold} onChange={set("threshold")} required /></label>
-          <label>Deadline (days from now)<input type="number" min={1} value={form.days} onChange={set("days")} required /></label>
-          <label>Token (blank = native POT, or an ERC-20 address)<input value={form.token} onChange={set("token")} placeholder="blank for POT" /></label>
-          <p className="hint">{totalHint}</p>
-          <button type="submit" disabled={busy || !(account && chainOk && cfg?.registryAddress)}>Fund and create grant</button>
-        </form>
-        <p className={`status ${create.cls}`}>{create.text}</p>
-      </section>
+      <main>
+        <section className="hero">
+          <h1>Funds release when the commit is real.</h1>
+          <p className="lede">Fund a builder in milestones. Each one is claimed with a git commit, checked by reviewers you choose, and paid out on-chain as soon as enough of them approve.</p>
+          <ol className="how" aria-label="How a milestone is paid">
+            <li><span className="how-node" /><b>Builder anchors a commit</b><span>The commit hash is stored on-chain and checked against GitHub.</span></li>
+            <li><span className="how-node" /><b>Reviewers approve</b><span>You set how many of them must agree.</span></li>
+            <li><span className="how-node on" /><b>Funds are released</b><span>The contract pays the milestone automatically.</span></li>
+          </ol>
+        </section>
 
-      <section>
-        <h2>Grants</h2>
-        <p className={`status ${list.cls}`}>{list.text}</p>
-        {cfg && grants.map((g) => (
-          <GrantCard key={g.id} g={g} symbol={cfg.nativeSymbol} decimals={cfg.nativeDecimals} account={account} now={now} run={run} />
-        ))}
-      </section>
-      <footer><p>All data is read from the contract. Commit evidence is checked live against GitHub&apos;s public API.</p></footer>
-    </main>
+        <div className="cols">
+          <section id="grants" aria-labelledby="grants-h">
+            <div className="sec-head">
+              <h2 id="grants-h">Grants</h2>
+              {list.kind === "ready" && totals && <p>{totals.count} on-chain, {fmt(totals.released, cfg!.nativeDecimals)} {cfg!.nativeSymbol} released</p>}
+            </div>
+            {configErr && <p className="empty bad">The app could not load its configuration (public/config.json).</p>}
+            {list.kind === "loading" && !configErr && <p className="empty">Reading grants from the chain…</p>}
+            {list.kind === "unconfigured" && <p className="empty">No registry is connected yet. Deploy the contract and set <span className="mono">registryAddress</span> in <span className="mono">public/config.json</span>.</p>}
+            {list.kind === "empty" && <p className="empty">No grants yet. Fund the first one with the form.</p>}
+            {list.kind === "error" && <p className="empty bad">Could not read the chain: {list.text}. Check the RPC URL and the registry address in <span className="mono">public/config.json</span>.</p>}
+            {cfg && grants.map((g) => <GrantTrack key={g.id} g={g} symbol={cfg.nativeSymbol} decimals={cfg.nativeDecimals} account={account} now={now} run={run} />)}
+          </section>
+          <aside>{cfg && <NewGrant cfg={cfg} blocker={blocker} busy={busy} onCreate={create} />}</aside>
+        </div>
+      </main>
+
+      <div className="toast-zone" aria-live="polite">
+        {toast && <p className={`toast toast-${toast.tone}`}>{toast.text}<button className="icon" aria-label="Dismiss" onClick={() => setToast(null)}>×</button></p>}
+      </div>
+    </>
   );
 }

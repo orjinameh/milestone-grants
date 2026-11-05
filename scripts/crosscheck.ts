@@ -6,7 +6,7 @@ const abi = new Interface([
   "function claimMilestone(uint256,uint256,bytes20,string)", "function approveMilestone(uint256,uint256)", "function reclaim(uint256)",
   "function grantCount() view returns (uint256)", "function grantInfo(uint256) view returns (tuple(address,address,address,uint128,uint128,uint64,uint64,uint8,bool,uint8,uint8))",
   "function milestoneInfo(uint256,uint256)", "function reviewerAt(uint256,uint256)", "function repoOf(uint256)", "function evidenceOf(uint256,uint256)",
-  "function approve(address,uint256)",
+  "function approve(address,uint256)", "function voted(uint256,uint256,address) view returns (bool)",
 ]);
 const A = "0x" + "11".repeat(20), B = "0x" + "22".repeat(20), C = "0x" + "ab".repeat(20);
 const cases: [string, string, unknown[]][] = [
@@ -15,7 +15,7 @@ const cases: [string, string, unknown[]][] = [
   ["claimMilestone", calls.claim(3, 1, C, "https://x.y/pr/1"), [3, 1, C, "https://x.y/pr/1"]],
   ["approveMilestone", calls.approve(3, 1), [3, 1]], ["reclaim", calls.reclaim(9), [9]], ["grantCount", calls.grantCount(), []],
   ["grantInfo", calls.grantInfo(4), [4]], ["milestoneInfo", calls.milestoneInfo(4, 2), [4, 2]], ["reviewerAt", calls.reviewerAt(4, 1), [4, 1]],
-  ["repoOf", calls.repoOf(4), [4]], ["evidenceOf", calls.evidenceOf(4, 0), [4, 0]], ["approve", calls.erc20Approve(A, "123"), [A, 123n]],
+  ["repoOf", calls.repoOf(4), [4]], ["evidenceOf", calls.evidenceOf(4, 0), [4, 0]], ["approve", calls.erc20Approve(A, "123"), [A, 123n]], ["voted", calls.voted(2, 1, B), [2, 1, B]],
 ];
 let bad = 0;
 for (const [fn, mine, args] of cases) {

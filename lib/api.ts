@@ -13,6 +13,7 @@ export const SIG = {
   repoOf: "repoOf(uint256)",
   evidenceOf: "evidenceOf(uint256,uint256)",
   erc20Approve: "approve(address,uint256)",
+  voted: "voted(uint256,uint256,address)",
 };
 export const calls = {
   createGrant: (p: { token: string; recipient: string; deadline: number; threshold: number; repo: string; reviewers: string[]; amounts: string[] }) =>
@@ -26,5 +27,6 @@ export const calls = {
   reviewerAt: (id: number, i: number) => encodeCall(SIG.reviewerAt, ["uint", "uint"], [id, i]),
   repoOf: (id: number) => encodeCall(SIG.repoOf, ["uint"], [id]),
   evidenceOf: (id: number, i: number) => encodeCall(SIG.evidenceOf, ["uint", "uint"], [id, i]),
+  voted: (id: number, i: number, who: string) => encodeCall(SIG.voted, ["uint", "uint", "address"], [id, i, who]),
   erc20Approve: (spender: string, amount: string) => encodeCall(SIG.erc20Approve, ["address", "uint"], [spender, amount]),
 };

@@ -3,7 +3,7 @@ import { words, wBig, wAddr, wBytes20, decodeString } from "./abi";
 
 export interface Config { registryAddress: string; chainId: number; chainName: string; rpcUrl: string; nativeSymbol: string; nativeDecimals: number }
 export interface Eip1193 { request(a: { method: string; params?: unknown[] }): Promise<any>; on?(e: string, f: () => void): void }
-export interface MilestoneView { amount: bigint; status: number; approvals: number; commit: string; evidence: string }
+export interface MilestoneView { amount: bigint; status: number; approvals: number; commit: string; evidence: string; viewerVoted?: boolean }
 export interface GrantView {
   id: number; funder: string; token: string; recipient: string; total: bigint; released: bigint;
   createdAt: number; deadline: number; threshold: number; closed: boolean; repo: string;
@@ -47,7 +47,7 @@ export async function readGrantCount(call: EthCall): Promise<number> {
   return Number(wBig(words(await call(calls.grantCount()))[0]));
 }
 
-export async function readGrant(call: EthCall, id: number): Promise<GrantView> {
+export async function readGrant(call: EthCall, id: number, viewer?: string | null): Promise<GrantView> {
   const w = words(await call(calls.grantInfo(id)));
   const nr = Number(wBig(w[9])), nm = Number(wBig(w[10]));
   const repo = decodeString(await call(calls.repoOf(id)));
@@ -58,7 +58,8 @@ export async function readGrant(call: EthCall, id: number): Promise<GrantView> {
     const m = words(await call(calls.milestoneInfo(id, i)));
     const status = Number(wBig(m[1]));
     milestones.push({ amount: wBig(m[0]), status, approvals: Number(wBig(m[2])), commit: wBytes20(m[3]),
-      evidence: status >= 1 ? decodeString(await call(calls.evidenceOf(id, i))) : "" });
+      evidence: status >= 1 ? decodeString(await call(calls.evidenceOf(id, i))) : "",
+      viewerVoted: viewer && status === 1 ? wBig(words(await call(calls.voted(id, i, viewer)))[0]) === 1n : undefined });
   }
   return { id, funder: wAddr(w[0]), token: wAddr(w[1]), recipient: wAddr(w[2]), total: wBig(w[3]), released: wBig(w[4]),
     createdAt: Number(wBig(w[5])), deadline: Number(wBig(w[6])), threshold: Number(wBig(w[7])), closed: wBig(w[8]) === 1n,
@@ -75,4 +76,27 @@ export async function sendTx(eth: Eip1193 | undefined, from: string | null, to: 
     await new Promise((r) => setTimeout(r, 2000));
   }
   throw new Error("Timed out waiting for confirmation (tx " + tx + ")");
+}
+
+export const isAddress = (a: string) => /^0x[0-9a-fA-F]{40}$/.test(a.trim());
+export const isRepo = (r: string) => /^[\w.-]+\/[\w.-]+$/.test(r.trim());
+const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
+export function timeLeft(deadline: number, now: number): string {
+  const d = deadline - now, a = Math.abs(d);
+  const span = a >= 172800 ? plural(Math.floor(a / 86400), "day") : a >= 3600 ? plural(Math.floor(a / 3600), "hour") : plural(Math.max(1, Math.floor(a / 60)), "minute");
+  return d >= 0 ? `${span} left` : `passed ${span} ago`;
+}
+/** Index of the milestone the grant is currently working on (first not yet released), or -1 when all are paid. */
+export const currentMilestone = (g: GrantView) => g.milestones.findIndex((m) => m.status !== 2);
+/** What, if anything, the connected account can do on this grant right now. */
+export function yourMove(g: GrantView, account: string | null, now: number): string | null {
+  if (!account || g.closed) return null;
+  const me = account.toLowerCase(), cur = currentMilestone(g);
+  if (cur >= 0) {
+    const m = g.milestones[cur];
+    if (me === g.recipient.toLowerCase() && m.status === 0 && now <= g.deadline) return `Claim milestone ${cur + 1}`;
+    if (m.status === 1 && g.reviewers.some((r) => r.toLowerCase() === me) && !m.viewerVoted) return `Review milestone ${cur + 1}`;
+  }
+  if (me === g.funder.toLowerCase() && now > g.deadline) return "Reclaim funds";
+  return null;
 }
