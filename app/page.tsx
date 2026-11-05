@@ -26,6 +26,16 @@ export default function Page() {
     setUnlockReq({ attempt, done: () => { setUnlockReq(null); resolve(); }, cancel: () => { setUnlockReq(null); reject(new Error("Signing cancelled.")); } });
   }), []);
   const setLogin = (w: Wallet) => { setWallet(w); try { localStorage.setItem(SESSION_KEY, JSON.stringify(w.session)); localStorage.removeItem("ext-account"); } catch {} };
+  const [copied, setCopied] = useState(false);
+  const copyAddress = async () => {
+    if (!wallet) return;
+    try { await navigator.clipboard.writeText(wallet.ss58); }
+    catch { // clipboard API unavailable (non-secure context, older mobile browsers)
+      const t = document.createElement("textarea"); t.value = wallet.ss58; t.style.position = "fixed"; t.style.opacity = "0";
+      document.body.appendChild(t); t.select(); try { document.execCommand("copy"); } catch {} document.body.removeChild(t);
+    }
+    setCopied(true); setTimeout(() => setCopied(false), 1800);
+  };
   const logout = () => { setWallet(null); try { localStorage.removeItem(SESSION_KEY); localStorage.removeItem("ext-account"); } catch {} };
   const chainOk = !!wallet;
   const [grants, setGrants] = useState<GrantView[]>([]);
@@ -119,7 +129,7 @@ export default function Page() {
           <nav className="bar-r" aria-label="Wallet">
             <a className="bar-link" href="#new">New grant</a>
             {wallet
-              ? <><span className="wallet" title={`${wallet.ss58}\nEVM ${wallet.evm}`}><i className="dot ok" />{short(wallet.ss58)}</span><button className="btn btn-quiet" onClick={logout}>Log out</button></>
+              ? <><span className="wallet" title={`${wallet.ss58}\nEVM ${wallet.evm}`}><i className="dot ok" />{short(wallet.ss58)}</span><button className="btn btn-quiet" onClick={copyAddress} aria-label="Copy wallet address">{copied ? "Copied" : "Copy"}</button><button className="btn btn-quiet" onClick={logout}>Log out</button></>
               : <button className="btn" onClick={() => setLoginOpen(true)} disabled={!cfg || restoring}>{restoring ? "Restoring…" : "Log in"}</button>}
           </nav>
         </div>
