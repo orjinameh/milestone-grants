@@ -19,8 +19,8 @@ commit message, author and whether it was authored *before or after* the grant w
 - Reentrancy guard, checks-effects-interactions, custom errors, events for every state change
 - Not in scope: reviewer rejection votes (a stalled claim is resolved by the deadline + `reclaim`), governance tokens, upgradeability
 
-## Web app (`web/`, `src/lib/`)
-Static, dependency-free TypeScript. Own ABI encoder (`src/lib/abi.ts`, tested against the Solidity-docs vectors and
+## Web app (Next.js App Router, React, TypeScript)
+`app/`, `components/`, `public/config.json`; chain logic in `src/lib/`. Own dependency-free ABI encoder (`src/lib/abi.ts`, tested against the Solidity-docs vectors and
 cross-checked against ethers). Shows empty/offline states when no registry is configured or the RPC is unreachable; never fake data.
 
 ## Run it
@@ -31,11 +31,11 @@ npm run crosscheck               # encoder == ethers for every UI call
 npm run compile && npm run test:contract
 
 export DEPLOYER_PRIVATE_KEY=0x…  # TESTNET-ONLY key funded with POT
-npm run deploy:portaldot         # writes deployment.json and sets web/config.json registryAddress
-npm run build:web && npm run serve:web   # http://localhost:8080
+npm run deploy:portaldot         # writes deployment.json and sets public/config.json registryAddress
+npm run dev                      # http://localhost:3000  (or `npm run build && npm start`)
 ```
 Network: chain ID `420420777`, EVM RPC `https://test-evm-rpc-v3.portaldot.dev`.
 
 ## Disclosure
-No third-party runtime code. Dev tooling: Hardhat, ethers, TypeScript, tsx. Built with AI assistance (Claude).
+Runtime: Next.js and React only; the contract client has no third-party code. Dev tooling: Hardhat, ethers, TypeScript, tsx. Built with AI assistance (Claude).
 License: MIT

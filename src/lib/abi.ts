@@ -1,6 +1,6 @@
 // Minimal ABI encoder/decoder (no dependencies) for the MilestoneGrants UI.
-import { keccak256 } from "./keccak.js";
-import { bigToBytes32, bytesToBig, bytesToHex, concat, hexToBytes, utf8 } from "./hex.js";
+import { keccak256 } from "./keccak";
+import { bigToBytes32, bytesToBig, bytesToHex, concat, hexToBytes, utf8 } from "./hex";
 
 export type AbiType = "address" | "bool" | "uint" | "bytes32" | "bytes20" | "string" | "bytes" | "address[]" | "uint[]" | { tuple: AbiType[] };
 

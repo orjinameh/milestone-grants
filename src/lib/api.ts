@@ -1,5 +1,5 @@
 // Contract call descriptors for MilestoneGrants.
-import { encodeCall, type AbiType } from "./abi.js";
+import { encodeCall, type AbiType } from "./abi";
 const CP: AbiType = { tuple: ["address", "address", "uint", "uint", "string", "address[]", "uint[]"] };
 export const SIG = {
   createGrant: "createGrant((address,address,uint64,uint8,string,address[],uint128[]))",
