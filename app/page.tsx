@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { calls } from "../lib/api";
 import { fmt, isNative, makeEthCall, parseUnits, readGrant, readGrantCount, short, type Config, type GrantView } from "../lib/chain";
-import { toEvm, type Wallet } from "../lib/wallet";
+import { reconnectExtension, toEvm, type Wallet } from "../lib/wallet";
 import LoginDialog from "../components/LoginDialog";
 import GrantTrack from "../components/GrantTrack";
 import NewGrant, { type NewGrantParams } from "../components/NewGrant";
@@ -18,6 +18,7 @@ export default function Page() {
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [loginOpen, setLoginOpen] = useState(false);
   const account = wallet?.evm ?? null;
+  const setLogin = (w: Wallet) => { setWallet(w); try { if (w.kind === "extension") localStorage.setItem("ext-account", w.ss58); } catch {} };
   const chainOk = !!wallet;
   const [grants, setGrants] = useState<GrantView[]>([]);
   const [list, setList] = useState<ListState>({ kind: "loading" });
@@ -32,6 +33,12 @@ export default function Page() {
   useEffect(() => {
     fetch("/config.json", { cache: "no-store" }).then((r) => r.json()).then(setCfg).catch(() => setConfigErr(true));
   }, []);
+
+  useEffect(() => {
+    if (!cfg) return;
+    let saved: string | null = null; try { saved = localStorage.getItem("ext-account"); } catch {}
+    if (saved) void reconnectExtension(cfg, saved).then((w) => { if (w) setWallet(w); });
+  }, [cfg]);
 
   const load = useCallback(async () => {
     if (!cfg) return;
@@ -132,7 +139,7 @@ export default function Page() {
         </div>
       </main>
 
-      {loginOpen && cfg && <LoginDialog cfg={cfg} onClose={() => setLoginOpen(false)} onWallet={(w) => { setWallet(w); setLoginOpen(false); }} />}
+      {loginOpen && cfg && <LoginDialog cfg={cfg} onClose={() => setLoginOpen(false)} onWallet={(w) => { setLogin(w); setLoginOpen(false); }} />}
       <div className="toast-zone" aria-live="polite">
         {toast && <p className={`toast toast-${toast.tone}`}>{toast.text}<button className="icon" aria-label="Dismiss" onClick={() => setToast(null)}>×</button></p>}
       </div>

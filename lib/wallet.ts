@@ -10,22 +10,15 @@ export interface Wallet { kind: LoginKind; name: string; ss58: string; evm: stri
 export interface AccountInfo { address?: string; name?: string; ss58Format?: number }
 
 const APP = "Milestone Grants";
-/** Dynamic import that survives flaky networks and stale deployments: retry, then reload once. */
+/** Dynamic import with a few retries. Never reloads the page. */
 async function load<T>(f: () => Promise<T>): Promise<T> {
-  const chunkErr = (e: unknown) => /Loading chunk|ChunkLoadError|dynamically imported|Failed to fetch dynamically/i.test(String((e as Error)?.message ?? e));
   for (let i = 0; ; i++) {
-    try { const m = await f(); try { sessionStorage.removeItem("chunk-retry"); } catch {} return m; }
+    try { return await f(); }
     catch (e) {
-      if (!chunkErr(e)) throw e;
       if (i < 3) { await new Promise((r) => setTimeout(r, 800 * (i + 1))); continue; }
-      try { if (!sessionStorage.getItem("chunk-retry")) { sessionStorage.setItem("chunk-retry", "1"); location.reload(); return new Promise<T>(() => {}); } } catch {}
-      throw new Error("Could not download the wallet code (network problem). Check your connection and try again.");
+      throw new Error("Could not download the wallet code (network problem). Try again.");
     }
   }
-}
-/** Start downloading the wallet libraries early so login is instant and failures retry in the background. */
-export function preload() {
-  void Promise.allSettled([load(() => import("@polkadot/util-crypto")), load(() => import("@polkadot/keyring")), load(() => import("@polkadot/extension-dapp")), load(() => import("@polkadot/api"))]);
 }
 const rpc = async (url: string, method: string, params: unknown[]) => {
   const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
@@ -112,4 +105,9 @@ export async function loginFiles(cfg: Config, files: { name: string; text: strin
   try { pair.decodePkcs8(password); } catch { throw new Error("Wrong password for this keystore."); }
   if (info?.address && info.address !== pair.address && keyring.encodeAddress(pair.publicKey) !== info.address) throw new Error("The account info file does not match this keystore.");
   return makeWallet(info ? "both" : "keystore", { address: pair.address, name: info?.name ?? keystore.meta?.name ?? "Keystore account", pair }, cfg);
+}
+
+/** Re-attach a previously chosen extension account without any prompt (returns null if not possible). */
+export async function reconnectExtension(cfg: Config, ss58: string): Promise<Wallet | null> {
+  try { return (await loginExtension(cfg)).find((w) => w.ss58 === ss58) ?? null; } catch { return null; }
 }
