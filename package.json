@@ -12,7 +12,7 @@
     "crosscheck": "tsx scripts/crosscheck.ts",
     "compile": "hardhat compile",
     "test:contract": "hardhat test",
-    "deploy:portaldot": "tsx scripts/deploy.cjs"
+    "deploy:portaldot": "node scripts/deploy-revive.mjs"
   },
   "dependencies": {
     "@polkadot/api": "^17.0.2",
