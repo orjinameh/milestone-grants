@@ -2,8 +2,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { calls } from "../lib/api";
 import { fmt, isNative, makeEthCall, parseUnits, readGrant, readGrantCount, short, type Config, type GrantView } from "../lib/chain";
-import { reconnectExtension, toEvm, type Wallet } from "../lib/wallet";
+import { restoreSession, toEvm, type Session, type Unlocker, type Wallet } from "../lib/wallet";
 import LoginDialog from "../components/LoginDialog";
+import UnlockDialog from "../components/UnlockDialog";
 import GrantTrack from "../components/GrantTrack";
 import NewGrant, { type NewGrantParams } from "../components/NewGrant";
 import { Mark } from "../components/Icons";
@@ -12,13 +13,20 @@ import type { Run } from "../components/MilestoneDetail";
 type Toast = { text: string; tone: "ok" | "bad" | "info" } | null;
 type ListState = { kind: "loading" | "unconfigured" | "empty" | "error" | "ready"; text?: string };
 const ZERO = "0x" + "00".repeat(20);
+const SESSION_KEY = "mg-session";
 
 export default function Page() {
   const [cfg, setCfg] = useState<Config | null>(null);
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [loginOpen, setLoginOpen] = useState(false);
   const account = wallet?.evm ?? null;
-  const setLogin = (w: Wallet) => { setWallet(w); try { if (w.kind === "extension") localStorage.setItem("ext-account", w.ss58); } catch {} };
+  const [restoring, setRestoring] = useState(true);
+  const [unlockReq, setUnlockReq] = useState<{ attempt: (pw: string) => void; done: () => void; cancel: () => void } | null>(null);
+  const unlocker: Unlocker = useCallback((attempt) => new Promise<void>((resolve, reject) => {
+    setUnlockReq({ attempt, done: () => { setUnlockReq(null); resolve(); }, cancel: () => { setUnlockReq(null); reject(new Error("Signing cancelled.")); } });
+  }), []);
+  const setLogin = (w: Wallet) => { setWallet(w); try { localStorage.setItem(SESSION_KEY, JSON.stringify(w.session)); localStorage.removeItem("ext-account"); } catch {} };
+  const logout = () => { setWallet(null); try { localStorage.removeItem(SESSION_KEY); localStorage.removeItem("ext-account"); } catch {} };
   const chainOk = !!wallet;
   const [grants, setGrants] = useState<GrantView[]>([]);
   const [list, setList] = useState<ListState>({ kind: "loading" });
@@ -31,14 +39,20 @@ export default function Page() {
   useEffect(() => { if (toast?.tone === "ok") { const h = setTimeout(() => setToast(null), 6000); return () => clearTimeout(h); } }, [toast]);
 
   useEffect(() => {
-    fetch("/config.json", { cache: "no-store" }).then((r) => r.json()).then(setCfg).catch(() => setConfigErr(true));
+    fetch("/config.json", { cache: "no-store" }).then((r) => r.json()).then(setCfg).catch(() => { setConfigErr(true); setRestoring(false); });
   }, []);
 
   useEffect(() => {
     if (!cfg) return;
-    let saved: string | null = null; try { saved = localStorage.getItem("ext-account"); } catch {}
-    if (saved) void reconnectExtension(cfg, saved).then((w) => { if (w) setWallet(w); });
-  }, [cfg]);
+    let saved: Session | null = null;
+    try {
+      const raw = localStorage.getItem(SESSION_KEY);
+      if (raw) saved = JSON.parse(raw);
+      else { const ext = localStorage.getItem("ext-account"); if (ext) saved = { kind: "extension", address: ext, name: "Account" }; } // sessions saved by older versions
+    } catch {}
+    if (!saved || !saved.address) { setRestoring(false); return; }
+    void restoreSession(cfg, saved, unlocker).then((w) => { if (w) setWallet(w); setRestoring(false); });
+  }, [cfg, unlocker]);
 
   const load = useCallback(async () => {
     if (!cfg) return;
@@ -105,8 +119,8 @@ export default function Page() {
           <nav className="bar-r" aria-label="Wallet">
             <a className="bar-link" href="#new">New grant</a>
             {wallet
-              ? <span className="wallet" title={`${wallet.ss58}\nEVM ${wallet.evm}`}><i className="dot ok" />{short(wallet.ss58)}</span>
-              : <button className="btn" onClick={() => setLoginOpen(true)} disabled={!cfg}>Log in</button>}
+              ? <><span className="wallet" title={`${wallet.ss58}\nEVM ${wallet.evm}`}><i className="dot ok" />{short(wallet.ss58)}</span><button className="btn btn-quiet" onClick={logout}>Log out</button></>
+              : <button className="btn" onClick={() => setLoginOpen(true)} disabled={!cfg || restoring}>{restoring ? "Restoring…" : "Log in"}</button>}
           </nav>
         </div>
       </header>
@@ -140,6 +154,7 @@ export default function Page() {
       </main>
 
       {loginOpen && cfg && <LoginDialog cfg={cfg} onClose={() => setLoginOpen(false)} onWallet={(w) => { setLogin(w); setLoginOpen(false); }} />}
+      {unlockReq && <UnlockDialog attempt={unlockReq.attempt} onDone={unlockReq.done} onCancel={unlockReq.cancel} />}
       <div className="toast-zone" aria-live="polite">
         {toast && <p className={`toast toast-${toast.tone}`}>{toast.text}<button className="icon" aria-label="Dismiss" onClick={() => setToast(null)}>×</button></p>}
       </div>

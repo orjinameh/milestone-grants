@@ -1,14 +1,22 @@
 // Portaldot login: three ways in, one Substrate-style account (SS58, starts with 5).
 //   1. Browser extension (polkadot-js compatible, desktop browsers; Orion on mobile)
 //   2. Keystore JSON + password (encrypted key, decrypted in the browser, never uploaded)
-//   3. Account info JSON (public descriptor: name, address, ss58 prefix), paired with the keystore
+//   3. Account info JSON (public descriptor: name, address, ss58 prefix). Works alone (view-only) or paired with the keystore.
+// Either JSON file logs you in, in any order, one at a time or together. The login survives a page refresh
+// (extension: re-attached silently; keystore: the still-encrypted file is kept in localStorage and the password
+// is asked again only when you sign).
 // Reads go through the public EVM RPC. Writes are signed as Substrate extrinsics (revive.call).
 import type { Config } from "./chain";
 
 
 export type LoginKind = "extension" | "keystore" | "both" | "info";
-export interface Wallet { kind: LoginKind; name: string; ss58: string; evm: string; send(to: string, data: string, value?: string): Promise<string> }
+/** What is kept in localStorage to restore a login after a refresh. Never holds a decrypted key or a password. */
+export interface Session { kind: LoginKind; address: string; name: string; ss58Format?: number; keystore?: any }
+/** Asks the user for the keystore password; `attempt` throws on a wrong one so the dialog can show it and retry. */
+export type Unlocker = (attempt: (password: string) => void) => Promise<void>;
+export interface Wallet { kind: LoginKind; name: string; ss58: string; evm: string; session: Session; send(to: string, data: string, value?: string): Promise<string> }
 export interface AccountInfo { address?: string; name?: string; ss58Format?: number }
+export interface ParsedFile { kind: "keystore" | "info"; keystore?: any; info?: AccountInfo }
 
 const APP = "Milestone Grants";
 /** Lazy import. Retries only real chunk download failures; any other error is passed through untouched. */
@@ -43,13 +51,17 @@ async function connectApi(cfg: Config) {
   return ApiPromise.create({ provider: new WsProvider(cfg.wsUrl) });
 }
 
-type Signer = { address: string; name: string; signer?: any; pair?: any; viewOnly?: boolean };
+type Signer = { address: string; name: string; signer?: any; pair?: any; viewOnly?: boolean; unlock?: Unlocker };
 
-async function makeWallet(kind: LoginKind, who: Signer, cfg: Config): Promise<Wallet> {
+async function makeWallet(kind: LoginKind, who: Signer, cfg: Config, session: Session): Promise<Wallet> {
   const evm = await toEvm(who.address, cfg);
   let apiP: Promise<any> | undefined;
   const send = async (to: string, data: string, value?: string) => {
     if (who.viewOnly) throw new Error("This is a view-only login (account info file only). Log in with the extension or a keystore file to sign.");
+    if (who.pair?.isLocked) { // restored after a refresh: the key is still encrypted, ask for the password once
+      if (!who.unlock) throw new Error("This keystore is locked. Log in again with the keystore file and password.");
+      await who.unlock((pw) => who.pair.decodePkcs8(pw));
+    }
     apiP ??= connectApi(cfg);
     const api = await apiP;
     // Revive takes value in native units; the contract sees it scaled by NativeToEthRatio.
@@ -69,7 +81,7 @@ async function makeWallet(kind: LoginKind, who: Signer, cfg: Config): Promise<Wa
       }).catch(reject);
     });
   };
-  return { kind, name: who.name, ss58: who.address, evm, send };
+  return { kind, name: who.name, ss58: who.address, evm, session, send };
 }
 
 /** 1. Browser extension. */
@@ -80,33 +92,87 @@ export async function loginExtension(cfg: Config): Promise<Wallet[]> {
   const accounts = await web3Accounts({ ss58Format: cfg.ss58Format ?? 42 });
   if (!accounts.length) throw new Error("The extension has no accounts, or access was declined.");
   const injector = await web3FromSource(accounts[0].meta.source);
-  return Promise.all(accounts.map((a) => makeWallet("extension", { address: a.address, name: a.meta.name ?? "Account", signer: injector.signer }, cfg)));
+  return Promise.all(accounts.map((a) => makeWallet("extension", { address: a.address, name: a.meta.name ?? "Account", signer: injector.signer }, cfg, { kind: "extension", address: a.address, name: a.meta.name ?? "Account" })));
 }
 
-/** 2 + 3. Any combination of files works: keystore JSON (needs the password), account info JSON, or both. */
-export async function loginFiles(cfg: Config, files: { name: string; text: string }[], password: string): Promise<Wallet> {
-  let keystore: any, info: AccountInfo | undefined;
-  for (const f of files) {
-    let j: any;
-    try { j = JSON.parse(f.text); } catch { throw new Error(`${f.name} is not valid JSON.`); }
-    if (j && typeof j === "object" && "encoded" in j) keystore = j; else info = j;
+const EVM20 = /^0x[0-9a-fA-F]{40}$/;
+const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === "object" && !Array.isArray(v);
+const firstOf = (vals: unknown[], type: "string" | "number") => vals.find((v) => typeof v === type && (type === "number" ? Number.isInteger(v) : !!v)) as any;
+
+/** Tells a keystore (has an encrypted "encoded" key) from an account info file (has an address), whatever the exact export shape. */
+export function classify(text: string): ParsedFile {
+  let j: any;
+  try { j = JSON.parse(text); } catch { throw new Error("not valid JSON"); }
+  for (let i = 0; i < 3; i++) { // unwrap [ {...} ], { accounts: [...] }, { keystore: {...} }, { account: {...} }
+    if (Array.isArray(j)) j = j[0];
+    else if (isObj(j) && typeof j.encoded !== "string" && Array.isArray(j.accounts)) j = j.accounts[0];
+    else if (isObj(j) && typeof j.encoded !== "string" && (isObj(j.keystore) || isObj(j.account))) j = j.keystore ?? j.account;
+    else break;
   }
-  if (!keystore && !info) throw new Error("Select a keystore or account info JSON file.");
+  if (!isObj(j)) throw new Error("not a keystore or account info file");
+  if (typeof j.encoded === "string") return { kind: "keystore", keystore: j };
+  const m = isObj(j.meta) ? j.meta : {};
+  const address = firstOf([j.address, j.ss58Address, j.ss58, j.account, j.accountId, j.account_id, j.publicKey, j.public_key, m.address], "string");
+  if (!address) throw new Error("no keystore data and no account address found in it");
+  return { kind: "info", info: { address, name: firstOf([j.name, j.accountName, m.name], "string"), ss58Format: firstOf([j.ss58Format, j.ss58Prefix, j.prefix, m.ss58Format], "number") } };
+}
+
+async function newKeyring(ss58Format: number) {
   const { Keyring } = await load(() => import("@polkadot/keyring"));
   const { cryptoWaitReady } = await load(() => import("@polkadot/util-crypto"));
   await cryptoWaitReady();
-  const keyring = new Keyring({ type: "sr25519", ss58Format: info?.ss58Format ?? cfg.ss58Format ?? 42 });
+  return new Keyring({ type: "sr25519", ss58Format });
+}
+
+/** SS58 in the keyring's prefix; a 0x public key is encoded, a 0x 20-byte EVM address is kept as is. */
+async function normAddress(keyring: any, raw: string): Promise<string> {
+  if (EVM20.test(raw)) return raw;
+  if (/^0x[0-9a-fA-F]{64}$/.test(raw)) { const { hexToU8a } = await load(() => import("@polkadot/util")); return keyring.encodeAddress(hexToU8a(raw)); }
+  try { return keyring.encodeAddress(keyring.decodeAddress(raw)); } catch { throw new Error("The address in the account info file is not valid."); }
+}
+
+/** 2 + 3. Any combination works: keystore JSON (needs the password), account info JSON (view-only), or both. */
+export async function loginFiles(cfg: Config, files: { name: string; text: string }[], password: string): Promise<Wallet> {
+  let keystore: any, info: AccountInfo | undefined;
+  for (const f of files) {
+    let p: ParsedFile;
+    try { p = classify(f.text); } catch (e) { throw new Error(`${f.name}: ${(e as Error).message}.`); }
+    if (p.kind === "keystore") keystore = p.keystore; else info = p.info;
+  }
+  if (!keystore && !info) throw new Error("Select a keystore or account info JSON file.");
+  const ss58Format = info?.ss58Format ?? cfg.ss58Format ?? 42;
+  const keyring = await newKeyring(ss58Format);
+  const address = info?.address ? await normAddress(keyring, info.address) : undefined;
   if (!keystore) {
-    const addr = info?.address;
-    if (!addr) throw new Error("That file has no keystore and no address, so there is nothing to log in with.");
-    try { keyring.decodeAddress(addr); } catch { throw new Error("The address in the account info file is not valid."); }
-    return makeWallet("info", { address: addr, name: info?.name ?? "Account", viewOnly: true }, cfg);
+    if (!address) throw new Error("That file has no keystore and no address, so there is nothing to log in with.");
+    const name = info?.name ?? "Account";
+    return makeWallet("info", { address, name, viewOnly: true }, cfg, { kind: "info", address, name, ss58Format });
   }
   if (!password) throw new Error("Enter the keystore password.");
-  const pair = keyring.createFromJson(keystore);
+  let pair: any;
+  try { pair = keyring.createFromJson(keystore); } catch { throw new Error("That keystore file could not be read."); }
   try { pair.decodePkcs8(password); } catch { throw new Error("Wrong password for this keystore."); }
-  if (info?.address && info.address !== pair.address && keyring.encodeAddress(pair.publicKey) !== info.address) throw new Error("The account info file does not match this keystore.");
-  return makeWallet(info ? "both" : "keystore", { address: pair.address, name: info?.name ?? keystore.meta?.name ?? "Keystore account", pair }, cfg);
+  if (address) {
+    const { u8aToHex } = await load(() => import("@polkadot/util"));
+    const same = EVM20.test(address) ? address.toLowerCase() === (await toEvm(pair.address, cfg)).toLowerCase() : u8aToHex(keyring.decodeAddress(address)) === u8aToHex(pair.publicKey);
+    if (!same) throw new Error("The account info file does not match this keystore.");
+  }
+  const name = info?.name ?? keystore.meta?.name ?? "Keystore account";
+  const kind: LoginKind = info ? "both" : "keystore";
+  return makeWallet(kind, { address: pair.address, name, pair }, cfg, { kind, address: pair.address, name, ss58Format, keystore });
+}
+
+/** Rebuild a login after a refresh. A keystore comes back locked: the account shows at once, the password is asked when signing. */
+export async function restoreSession(cfg: Config, s: Session, unlock: Unlocker): Promise<Wallet | null> {
+  try {
+    if (s.kind === "extension") return await reconnectExtension(cfg, s.address);
+    const keyring = await newKeyring(s.ss58Format ?? cfg.ss58Format ?? 42);
+    if (s.keystore) {
+      const pair = keyring.createFromJson(s.keystore);
+      return await makeWallet(s.kind, { address: pair.address, name: s.name, pair, unlock }, cfg, s);
+    }
+    return await makeWallet("info", { address: s.address, name: s.name, viewOnly: true }, cfg, s);
+  } catch { return null; }
 }
 
 /** Re-attach a previously chosen extension account without any prompt (returns null if not possible). */
