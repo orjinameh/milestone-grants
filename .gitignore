@@ -5,3 +5,5 @@ artifacts/
 cache/
 .env
 next-env.d.ts
+*keystore*.json
+*.tsbuildinfo

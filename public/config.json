@@ -1,10 +1,8 @@
 {
-  "registryAddress": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
-  "chainId": 420420777,
-  "chainName": "Portaldot V3 Testnet",
-  "rpcUrl": "https://test-evm-rpc-v3.portaldot.dev",
+  "registry": "",
+  "wsUrl": "wss://test-node-v3.portaldot.dev",
   "nativeSymbol": "POT",
   "nativeDecimals": 18,
-  "wsUrl": "wss://test-node-v3.portaldot.dev",
-  "ss58Format": 42
+  "ss58Format": 42,
+  "demo": { "repo": "paritytech/polkadot-sdk" }
 }

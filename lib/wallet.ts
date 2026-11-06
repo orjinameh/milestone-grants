@@ -5,11 +5,12 @@
 // Either JSON file logs you in, in any order, one at a time or together. The login survives a page refresh
 // (extension: re-attached silently; keystore: the still-encrypted file is kept in localStorage and the password
 // is asked again only when you sign).
-// Reads go through the public EVM RPC. Writes are signed as Substrate extrinsics (revive.call).
-import type { Config } from "./chain";
+// Everything is native: reads are `reviveApi.call` dry runs and writes are signed `revive.call` extrinsics, both over the
+// Substrate WebSocket (wsUrl). No Ethereum RPC is involved.
+import type { Config, ContractCall } from "./chain";
 
 
-export type LoginKind = "extension" | "keystore" | "both" | "info";
+export type LoginKind = "extension" | "keystore" | "both" | "info" | "demo";
 /** What is kept in localStorage to restore a login after a refresh. Never holds a decrypted key or a password. */
 export interface Session { kind: LoginKind; address: string; name: string; ss58Format?: number; keystore?: any }
 /** Asks the user for the keystore password; `attempt` throws on a wrong one so the dialog can show it and retry. */
@@ -31,11 +32,6 @@ async function load<T>(f: () => Promise<T>): Promise<T> {
     }
   }
 }
-const rpc = async (url: string, method: string, params: unknown[]) => {
-  const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
-  const j = await r.json(); if (j.error) throw new Error(j.error.message); return j.result as string;
-};
-
 /** 5… address to the 32-byte AccountId32 hex the contract takes. */
 export async function toAccountId(address: string): Promise<string> {
   const { decodeAddress } = await load(() => import("@polkadot/util-crypto"));
@@ -64,20 +60,46 @@ async function connectApi(cfg: Config) {
   const { ApiPromise, WsProvider } = await load(() => import("@polkadot/api"));
   return ApiPromise.create({ provider: new WsProvider(cfg.wsUrl) });
 }
+/** One shared connection for reads and writes. A failed connection is not cached, so the next call retries. */
+const apis = new Map<string, Promise<any>>();
+function getApi(cfg: Config): Promise<any> {
+  let p = apis.get(cfg.wsUrl);
+  if (!p) { p = connectApi(cfg); apis.set(cfg.wsUrl, p); p.catch(() => apis.delete(cfg.wsUrl)); }
+  return p;
+}
+
+/** The registry's 20-byte call target, from its 5… account in config. */
+export const registryTarget = (cfg: Config) => {
+  if (!cfg.registry) throw new Error("The registry address is not set in public/config.json.");
+  return contractTarget(cfg.registry);
+};
+
+/** Read-only calls: a `reviveApi.call` dry run against the registry. The caller is irrelevant for views, so any account works. */
+const READ_ORIGIN = "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY";
+export function makeCall(cfg: Config): ContractCall {
+  return async (data) => {
+    const [api, target] = await Promise.all([getApi(cfg), registryTarget(cfg)]);
+    const res = await api.call.reviveApi.call(READ_ORIGIN, target, 0, null, null, data);
+    if (res.result.isErr) throw new Error("The node rejected the read. Check registry in public/config.json.");
+    const out = res.result.asOk;
+    if (Number(out.flags?.bits ?? 0) & 1) throw new Error("The registry rejected the read.");
+    const hex: string = out.data.toHex();
+    if (hex === "0x") throw new Error("No registry contract answered at that address. Check registry in public/config.json.");
+    return hex;
+  };
+}
 
 type Signer = { address: string; name: string; signer?: any; pair?: any; viewOnly?: boolean; unlock?: Unlocker };
 
 async function makeWallet(kind: LoginKind, who: Signer, cfg: Config, session: Session): Promise<Wallet> {
   const id = await toAccountId(who.address);
-  let apiP: Promise<any> | undefined;
   const send = async (to: string, data: string, value?: string) => {
     if (who.viewOnly) throw new Error("This is a view-only login (account info file only). Log in with the extension or a keystore file to sign.");
     if (who.pair?.isLocked) { // restored after a refresh: the key is still encrypted, ask for the password once
       if (!who.unlock) throw new Error("This keystore is locked. Log in again with the keystore file and password.");
       await who.unlock((pw) => who.pair.decodePkcs8(pw));
     }
-    apiP ??= connectApi(cfg);
-    const api = await apiP;
+    const api = await getApi(cfg);
     // Revive takes value in native units; the contract sees it scaled by NativeToEthRatio.
     const ratio = api.consts.revive?.nativeToEthRatio ? BigInt(api.consts.revive.nativeToEthRatio.toString()) : 10n ** BigInt(Math.max(0, cfg.nativeDecimals - (api.registry.chainDecimals[0] ?? cfg.nativeDecimals)));
     const nativeValue = (BigInt(value ?? "0") / ratio).toString();

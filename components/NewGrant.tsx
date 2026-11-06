@@ -2,6 +2,7 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { isAddress, isRepo, parseUnits, fmt, type Config } from "../lib/chain";
 import { Cross, Plus } from "./Icons";
+import { DEMO_ACCOUNTS } from "../lib/demo";
 
 export interface NewGrantParams { recipient: string; repo: string; amounts: string[]; reviewers: string[]; threshold: number; days: number; token: string }
 interface Props { cfg: Config; blocker: string | null; busy: boolean; onCreate: (p: NewGrantParams) => void }
@@ -42,11 +43,16 @@ export default function NewGrant({ cfg, blocker, busy, onCreate }: Props) {
     if (reason) return;
     onCreate({ recipient: recipient.trim(), repo: repo.trim(), amounts: parsed, reviewers, threshold: t, days, token: token.trim() });
   };
+  const fillDemo = () => { // demo mode only: one click fills a sensible grant
+    const [, builder, ...panel] = DEMO_ACCOUNTS;
+    setRecipient(builder.ss58); setRepo(cfg.demo?.repo ?? ""); setAmounts(["1", "2"]); setReviewers(panel.map((a) => a.ss58)); setThreshold(2); setDays(14); setToken("");
+  };
   const reclaimOn = new Date(Date.now() + days * 86400000).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 
   return (
     <form className="panel" onSubmit={submit} id="new" noValidate>
       <h2>New grant</h2>
+      {cfg.demo && <button type="button" className="btn btn-quiet" onClick={fillDemo}>Fill with demo accounts</button>}
       <label>Who receives the funds
         <input className="mono" value={recipient} onChange={(e) => setRecipient(e.target.value)} placeholder="5…" spellCheck={false} aria-invalid={recipient !== "" && !isAddress(recipient)} />
       </label>
@@ -101,13 +107,13 @@ export default function NewGrant({ cfg, blocker, busy, onCreate }: Props) {
         <p className="hint">Anything not released by {reclaimOn} can be reclaimed by you.</p>
       </fieldset>
 
-      <details className="more">
+      {!cfg.demo && <details className="more">
         <summary>Pay in a token instead of {cfg.nativeSymbol}</summary>
         <label>Token contract address
           <input className="mono" value={token} onChange={(e) => setToken(e.target.value)} placeholder="Token contract 5… (leave empty for native POT)" spellCheck={false} />
         </label>
         <p className="hint">You will approve the token transfer first, then fund the grant. Amounts use 18 decimals.</p>
-      </details>
+      </details>}
 
       <div className="summary">
         <span>{parsed.length} milestone{parsed.length === 1 ? "" : "s"}</span>

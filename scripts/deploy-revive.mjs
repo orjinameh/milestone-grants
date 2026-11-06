@@ -9,10 +9,10 @@ import fs from "node:fs";
 import readline from "node:readline";
 import { ApiPromise, WsProvider } from "@polkadot/api";
 import { Keyring } from "@polkadot/keyring";
-import { cryptoWaitReady, keccakAsHex } from "@polkadot/util-crypto";
+import { cryptoWaitReady, encodeAddress, keccakAsHex } from "@polkadot/util-crypto";
+import { hexToU8a, u8aConcat } from "@polkadot/util";
 
 const WS = process.env.PORTALDOT_WS || "wss://test-node-v3.portaldot.dev";
-const RPC = process.env.PORTALDOT_EVM_RPC || "https://test-evm-rpc-v3.portaldot.dev";
 const ARTIFACT = "artifacts/contracts/MilestoneGrants.sol/MilestoneGrants.json";
 const CODE_LIMIT = 10240; // bytes, deployed-code limit reported for this chain
 const fail = (m) => { console.error("\n✗ " + m + "\n"); process.exit(1); };
@@ -96,19 +96,20 @@ async function main() {
   address = address.toLowerCase();
   console.log("Contract address:", address);
 
-  // 7. verify through the EVM RPC (reads work there)
+  // 7. verify natively: grantCount() must answer 0 on the fresh contract
   await new Promise((r) => setTimeout(r, 4000));
   const sel = keccakAsHex("grantCount()").slice(0, 10);
-  const r = await fetch(RPC, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: address, data: sel }, "latest"] }) }).then((x) => x.json());
-  const live = !r.error && typeof r.result === "string" && /^0x0{64}$/.test(r.result);
-  console.log(live ? "✓ Verified: grantCount() returns 0 over the EVM RPC." : `! Could not verify over the EVM RPC yet (${r.error?.message ?? r.result}). Wait a few blocks and try the page; the address may still be correct.`);
+  const rr = await api.call.reviveApi.call(pair.address, address, 0, null, null, sel).catch((e) => ({ error: e }));
+  const ok = rr.result?.isOk && !(Number(rr.result.asOk.flags?.bits ?? 0) & 1) && /^0x0{64}$/.test(rr.result.asOk.data.toHex());
+  console.log(ok ? "✓ Verified: grantCount() returns 0." : `! Could not verify yet (${rr.error?.message ?? "no answer"}). Wait a few blocks and open the page; the address may still be correct.`);
 
-  // 8. record + wire up the app
-  fs.writeFileSync("deployment.json", JSON.stringify({ address, deployer: pair.address, deployedAt: new Date().toISOString(), deployedBytes: deployedSize }, null, 2) + "\n");
+  // 8. wire up the app: the registry is the contract's account, shown as a 5… address (20-byte address + twelve 0xEE bytes)
+  const registry = encodeAddress(u8aConcat(hexToU8a(address), new Uint8Array(12).fill(0xee)), 42);
   const cfgPath = "public/config.json";
-  const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8")); cfg.registryAddress = address;
+  const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8")); cfg.registry = registry; delete cfg.demo;
   fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + "\n");
-  console.log("public/config.json updated. Commit deployment.json and public/config.json.");
+  console.log("Registry:", registry);
+  console.log("public/config.json updated (registry set, demo mode off). Commit public/config.json.");
   await api.disconnect();
   process.exit(0);
 }

@@ -1,8 +1,9 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { calls } from "../lib/api";
-import { fmt, isNative, makeEthCall, parseUnits, readGrant, readGrantCount, short, type Config, type GrantView } from "../lib/chain";
-import { contractTarget, restoreSession, toAccountId, type Session, type Unlocker, type Wallet } from "../lib/wallet";
+import { fmt, isNative, parseUnits, readGrant, readGrantCount, short, type Config, type GrantView } from "../lib/chain";
+import { contractTarget, makeCall, registryTarget, restoreSession, toAccountId, type Session, type Unlocker, type Wallet } from "../lib/wallet";
+import { DEMO_ACCOUNTS, DEMO_REGISTRY, demoCall, demoWallet, initDemo, resetDemo, restoreDemo } from "../lib/demo";
 import LoginDialog from "../components/LoginDialog";
 import UnlockDialog from "../components/UnlockDialog";
 import { buildBook, type Book } from "../lib/addressBook";
@@ -63,14 +64,17 @@ export default function Page() {
       else { const ext = localStorage.getItem("ext-account"); if (ext) saved = { kind: "extension", address: ext, name: "Account" }; } // sessions saved by older versions
     } catch {}
     if (!saved || !saved.address) { setRestoring(false); return; }
+    if (cfg.demo) { initDemo(cfg.demo.repo); const w = saved.kind === "demo" ? restoreDemo(saved) : null; if (w) setWallet(w); setRestoring(false); return; }
+    if (saved.kind === "demo") { setRestoring(false); return; }
     void restoreSession(cfg, saved, unlocker).then((w) => { if (w) setWallet(w); setRestoring(false); });
   }, [cfg, unlocker]);
 
   const load = useCallback(async () => {
     if (!cfg) return;
-    if (!cfg.registryAddress) { setGrants([]); return setList({ kind: "unconfigured" }); }
+    if (!cfg.demo && !cfg.registry) { setGrants([]); return setList({ kind: "unconfigured" }); }
     try {
-      const call = makeEthCall(cfg, undefined, false);
+      if (cfg.demo) initDemo(cfg.demo.repo);
+      const call = cfg.demo ? demoCall : makeCall(cfg);
       const n = await readGrantCount(call);
       if (n === 0) { setGrants([]); return setList({ kind: "empty" }); }
       const ids: number[] = [];
@@ -89,7 +93,7 @@ export default function Page() {
   const run: Run = async (data, label) => {
     if (!cfg) return;
     say({ text: label.pending, tone: "info" });
-    try { await wallet!.send(cfg.registryAddress, data); } catch (e) { say({ text: (e as Error).message, tone: "bad" }); throw e; }
+    try { await wallet!.send(cfg.demo ? DEMO_REGISTRY : await registryTarget(cfg), data); } catch (e) { say({ text: (e as Error).message, tone: "bad" }); throw e; }
     say({ text: label.done, tone: "ok" });
     await load();
   };
@@ -107,21 +111,22 @@ export default function Page() {
       if (new Set(reviewers).size !== reviewers.length) throw new Error("Two of the reviewers are the same account.");
       const token = p.token ? await toAccountId(p.token) : ZERO32;
       const native = isNative(token);
+      const target = cfg.demo ? DEMO_REGISTRY : await registryTarget(cfg);
       const tokenTarget = native ? "" : await contractTarget(p.token); // checked before anything is signed
       const deadline = Math.floor(Date.now() / 1000) + p.days * 86400;
       if (!native) {
         say({ text: "Approve the token transfer (sign with your account)…", tone: "info" });
-        await wallet!.send(tokenTarget, calls.erc20Approve(cfg.registryAddress, total));
+        await wallet!.send(tokenTarget, calls.erc20Approve(target, total));
       }
       say({ text: "Sign the grant with your account…", tone: "info" });
-      await wallet!.send(cfg.registryAddress, calls.createGrant({ funder, token, recipient, deadline, threshold: p.threshold, repo: p.repo, reviewers, amounts }), native ? total : "0");
+      await wallet!.send(target, calls.createGrant({ funder, token, recipient, deadline, threshold: p.threshold, repo: p.repo, reviewers, amounts }), native ? total : "0");
       say({ text: "Grant funded.", tone: "ok" });
       await load();
     } catch (e) { say({ text: (e as Error).message, tone: "bad" }); }
     setBusy(false);
   };
 
-  const blocker = !cfg ? "Loading…" : !cfg.registryAddress ? "The registry address is not set in public/config.json." : !wallet ? "Log in to fund a grant." : null;
+  const blocker = !cfg ? "Loading…" : !cfg.demo && !cfg.registry ? "The registry address is not set in public/config.json." : !wallet ? "Log in to fund a grant." : null;
 
   const totals = useMemo(() => {
     if (!cfg) return null;
@@ -138,11 +143,22 @@ export default function Page() {
           <nav className="bar-r" aria-label="Wallet">
             <a className="bar-link" href="#new">New grant</a>
             {wallet
-              ? <><span className="wallet" title={wallet.ss58}><i className="dot ok" />{short(wallet.ss58)}</span><button className="btn btn-quiet" onClick={copyAddress} aria-label="Copy wallet address">{copied ? "Copied" : "Copy"}</button><button className="btn btn-quiet" onClick={logout}>Log out</button></>
+              ? <>{cfg?.demo
+                  ? <select className="who" aria-label="Acting as" value={wallet.ss58} onChange={(e) => { const a = DEMO_ACCOUNTS.find((x) => x.ss58 === e.target.value); if (a) setLogin(demoWallet(a)); }}>
+                      {DEMO_ACCOUNTS.map((a) => <option key={a.ss58} value={a.ss58}>{a.role} · {short(a.ss58)}</option>)}
+                    </select>
+                  : <span className="wallet" title={wallet.ss58}><i className="dot ok" />{short(wallet.ss58)}</span>}<button className="btn btn-quiet" onClick={copyAddress} aria-label="Copy wallet address">{copied ? "Copied" : "Copy"}</button><button className="btn btn-quiet" onClick={logout}>Log out</button></>
               : <button className="btn" onClick={() => setLoginOpen(true)} disabled={!cfg || restoring}>{restoring ? "Restoring…" : "Log in"}</button>}
           </nav>
         </div>
       </header>
+
+      {cfg?.demo && (
+        <div className="demo-bar" role="note">
+          <span><b>Demo mode.</b> A simulated Portaldot chain running in this tab. No node, wallet or POT is used, and nothing is sent anywhere. The GitHub commit check is live.</span>
+          <button className="btn btn-quiet" onClick={() => { resetDemo(cfg.demo!.repo); void load(); }}>Reset demo</button>
+        </div>
+      )}
 
       <main>
         <section className="hero">
@@ -163,9 +179,9 @@ export default function Page() {
             </div>
             {configErr && <p className="empty bad">The app could not load its configuration (public/config.json).</p>}
             {list.kind === "loading" && !configErr && <p className="empty">Reading grants from the chain…</p>}
-            {list.kind === "unconfigured" && <p className="empty">No registry is connected yet. Deploy the contract and set <span className="mono">registryAddress</span> in <span className="mono">public/config.json</span>.</p>}
+            {list.kind === "unconfigured" && <p className="empty">No registry is connected yet. Deploy the contract and set <span className="mono">registry</span> (its 5… address) in <span className="mono">public/config.json</span>.</p>}
             {list.kind === "empty" && <p className="empty">No grants yet. Fund the first one with the form.</p>}
-            {list.kind === "error" && <p className="empty bad">Could not read the chain: {list.text}. Check the RPC URL and the registry address in <span className="mono">public/config.json</span>.</p>}
+            {list.kind === "error" && <p className="empty bad">Could not read the chain: {list.text}. Check <span className="mono">wsUrl</span> and <span className="mono">registry</span> in <span className="mono">public/config.json</span>.</p>}
             {cfg && grants.map((g) => <GrantTrack key={g.id} g={g} symbol={cfg.nativeSymbol} decimals={cfg.nativeDecimals} account={account} now={now} run={run} book={book} />)}
           </section>
           <aside>{cfg && <NewGrant cfg={cfg} blocker={blocker} busy={busy} onCreate={create} />}</aside>

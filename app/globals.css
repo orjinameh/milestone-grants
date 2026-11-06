@@ -221,3 +221,8 @@ main { padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
   .icon { width: 40px; height: 40px; }
   .btn, .choices button { min-height: 44px; }
 }
+
+/* demo mode */
+.demo-bar { display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; padding: 8px 20px; background: var(--claimed-wash); color: var(--ink); border-bottom: 1px solid var(--line); font-size: 0.9rem; text-align: center; }
+.demo-bar .btn { padding: 4px 12px; }
+.who { font: 500 0.88rem var(--f-mono); padding: 7px 12px; border: 1px solid var(--line); border-radius: 99px; background: var(--surface); color: var(--ink); max-width: 100%; }
