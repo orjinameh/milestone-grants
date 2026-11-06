@@ -1,7 +1,7 @@
 {
-  "registry": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
-  "rpcUrl": "https://zany-space-train-v6v5xjjw9xqcx677-8545.app.github.dev/",
-  "chainId": 31337,
-  "nativeSymbol": "ETH",
+  "registry": "0x93CA24A53eC91488ff7841AC9a00Cc0Ce7aC82Fa",
+  "rpcUrl": "https://test-evm-rpc-v3.portaldot.dev",
+  "chainId": 420420777,
+  "nativeSymbol": "POT",
   "nativeDecimals": 18
 }
