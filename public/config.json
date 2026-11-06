@@ -4,5 +4,5 @@
   "nativeSymbol": "POT",
   "nativeDecimals": 18,
   "ss58Format": 42,
-  "demo": { "repo": "paritytech/polkadot-sdk" }
+  "demo": { "repo": "orjinameh/milestone-grants" }
 }
