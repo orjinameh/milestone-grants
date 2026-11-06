@@ -57,19 +57,27 @@ async function main() {
   try { gas = await provider.estimateGas({ ...deployTx, from: wallet.address }); }
   catch (e) { fail(`The chain rejected the deployment estimate: ${e.shortMessage || e.message}\nIf this says Invalid Transaction, the EVM write path is not accepting this account yet. Tell me the exact message.`); }
   const price = fee.gasPrice ?? 0n;
+  if (price === 0n) fail("The chain reported a gas price of 0, which I do not trust. Tell me this output.");
   const cost = gas * price;
   console.log(`Estimated gas: ${gas}  gas price: ${price}  estimated cost: ${ethers.formatEther(cost)} POT`);
-  if (balance < cost) fail(`Not enough POT: have ${ethers.formatEther(balance)}, need about ${ethers.formatEther(cost)}. Ask the admins for more.`);
+  console.log("  (most of this is the chain's storage deposit for the contract's code; gas you do not use is refunded)");
+  // The node reserves gasLimit x gasPrice up front. Keep a small margin, never more than the balance, and send a legacy
+  // transaction with this exact price so the reservation is predictable (no EIP-1559 maxFee doubling).
+  const affordable = balance / price;
+  let gasLimit = (gas * 105n) / 100n;
+  if (gasLimit > affordable) gasLimit = affordable;
+  if (gasLimit < gas) fail(`Not enough POT: this deployment needs about ${ethers.formatEther(cost)} POT up front and you have ${ethers.formatEther(balance)}. Ask the admins for more.`);
+  console.log(`  gas limit to send: ${gasLimit}  (at most ${ethers.formatEther(gasLimit * price)} POT reserved, the unused part is refunded)`);
 
   if ((process.env.YES ?? (await ask("Deploy now? (y/N) "))).toLowerCase().startsWith("y") === false) { console.log("Cancelled. Nothing was sent."); process.exit(0); }
 
   // 5. deploy
   let contract;
   try {
-    contract = await factory.deploy({ gasLimit: (gas * 12n) / 10n });
+    contract = await factory.deploy({ gasLimit, gasPrice: price, type: 0 });
     console.log("Sent:", contract.deploymentTransaction().hash, " waiting for confirmation…");
     await contract.waitForDeployment();
-  } catch (e) { fail(`Deployment failed: ${e.shortMessage || e.message}\nIf this says Invalid Transaction, the chain is rejecting EVM-signed writes from this account. Tell me the exact message.`); }
+  } catch (e) { fail(`Deployment failed: ${e.shortMessage || e.message}\nThe node said: ${e.info?.error?.message || e.error?.message || e.info?.responseBody || "(no detail)"}\nIf this says Invalid Transaction, the chain is rejecting EVM-signed writes from this account. Tell me the exact message.`); }
   const address = await contract.getAddress();
   ok(`Deployed at ${address}`);
 
