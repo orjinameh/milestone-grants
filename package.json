@@ -15,8 +15,10 @@
     "compile": "hardhat compile",
     "compile:pvm": "node scripts/compile-pvm.mjs",
     "test:contract": "hardhat test",
-    "deploy:portaldot": "node scripts/deploy-evm.mjs",
-    "check:registry": "node scripts/check-registry.mjs"
+    "deploy:portaldot": "node scripts/deploy-revive.mjs",
+    "check:registry": "node scripts/check-registry.mjs",
+    "e2e:local": "tsx scripts/e2e-local.ts",
+    "verify:local": "hardhat compile && hardhat test && npm run test:abi && npm run test:demo && npm run test:separation && npm run crosscheck"
   },
   "dependencies": {
     "@metamask/connect-evm": "^2.1.1",
