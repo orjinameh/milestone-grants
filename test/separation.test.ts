@@ -26,5 +26,5 @@ test("the real page and the shared screen do not import the demo", () => {
 test("the demo has its own session key, apart from the real login", () => {
   const demo = readFileSync("demo/mode.tsx", "utf8"), real = readFileSync("app/page.tsx", "utf8");
   assert.match(demo, /sessionKey: "mg-demo-session"/);
-  assert.match(real, /SESSION_KEY = "mg-session"/);
+  assert.match(real, /SESSION_KEY = "mg-evm-session"/);
 });
