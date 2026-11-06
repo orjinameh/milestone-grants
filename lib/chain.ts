@@ -2,7 +2,7 @@ import { calls } from "./api";
 import { words, wBig, wId, wBytes20, decodeString } from "./abi";
 
 /** `registry` is the contract's account as a 5… address. */
-export interface Config { registry?: string; wsUrl: string; nativeSymbol: string; nativeDecimals: number; ss58Format?: number }
+export interface Config { registry?: string; rpcUrl?: string; chainId?: number; wsUrl?: string; nativeSymbol: string; nativeDecimals: number; ss58Format?: number }
 export interface MilestoneView { amount: bigint; status: number; approvals: number; commit: string; evidence: string; viewerVoted?: boolean }
 export interface GrantView {
   id: number; funder: string; token: string; recipient: string; total: bigint; released: bigint;
@@ -51,9 +51,9 @@ export async function readGrant(call: ContractCall, id: number, viewer?: string 
     repo, reviewers, milestones };
 }
 
-export const isSs58 = (a: string) => /^5[1-9A-HJ-NP-Za-km-z]{46,47}$/.test(a.trim());
-/** Accounts are Substrate (5…) addresses only. */
-export const isAddress = (a: string) => isSs58(a);
+/** EVM address validation. */
+export const isAddress = (a: string) => /^0x[0-9a-fA-F]{40}$/.test(a.trim());
+export const isSs58 = isAddress;
 export const isRepo = (r: string) => /^[\w.-]+\/[\w.-]+$/.test(r.trim());
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 export function timeLeft(deadline: number, now: number): string {

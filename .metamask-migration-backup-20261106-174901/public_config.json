@@ -1,0 +1,7 @@
+{
+  "registry": "",
+  "wsUrl": "wss://test-node-v3.portaldot.dev",
+  "nativeSymbol": "POT",
+  "nativeDecimals": 18,
+  "ss58Format": 42
+}

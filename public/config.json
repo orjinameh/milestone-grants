@@ -1,7 +1,7 @@
 {
   "registry": "",
-  "wsUrl": "wss://test-node-v3.portaldot.dev",
+  "rpcUrl": "https://test-evm-rpc-v3.portaldot.dev",
+  "chainId": 420420777,
   "nativeSymbol": "POT",
-  "nativeDecimals": 18,
-  "ss58Format": 42
+  "nativeDecimals": 18
 }
