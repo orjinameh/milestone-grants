@@ -11,6 +11,10 @@ unreleased.
 **Evidence is real:** the web app verifies each anchored commit live against GitHub's public API and shows the
 commit message, author and whether it was authored *before or after* the grant was created.
 
+## Architecture
+
+See [Product Architecture](docs/architecture.md) for the system overview, components and deployment status.
+
 ## Contract: `contracts/MilestoneGrants.sol`
 - `createGrant(CreateParams)` payable — native or ERC-20 (via `transferFrom`), accounts passed as 32-byte AccountId32 values, ≤10 reviewers, ≤10 milestones, M-of-N threshold
 - `claimMilestone(id, index, commit, evidence)` — recipient only, in order, before the deadline
