@@ -38,14 +38,8 @@ Network: chain ID `420420777`, EVM RPC `https://test-evm-rpc-v3.portaldot.dev`.
 
 ## Login (Portaldot Substrate accounts, address starts with 5)
 Three ways in, all giving the same account type: browser extension (desktop, or Orion on mobile), keystore JSON + password, and the account info JSON alongside the keystore. Keys are decrypted in the browser only. Writes are signed as `revive.call` extrinsics (Portaldot V3 runs pallet-revive), after a `reviveApi.call` dry run for weight and deposit limits. A `5…` account acts on the contract as the address keccak256(publicKey)[12..].
-`public/config.json` holds `wsUrl` (`wss://test-node-v3.portaldot.dev`). Recipients and reviewers may be entered as `5…` or `0x…`.
+`public/config.json` holds `wsUrl` (`wss://test-node-v3.portaldot.dev`). Recipients and reviewers may be entered as `5…` or `0x…`. The contract itself works with 20-byte addresses (`address` in Solidity, as on every pallet-revive chain), so on-chain data comes back as `0x…`; the app remembers the `5…` form of your own account and of any `5…` address you enter, and shows that form where it knows it.
 
 ## Disclosure
 Runtime: Next.js and React only; the contract client has no third-party code. Dev tooling: Hardhat, ethers, TypeScript, tsx. Built with AI assistance (Claude).
 License: MIT
-
-## Deployment status
-
-The contract compiles to 5,782 bytes of deployed code (under the chain's 10,240-byte limit) and passes the full test suite (`npm run test:contract`, `npm run test:abi`).
-
-Testnet deployment on Portaldot V3 is blocked by the storage deposit: pallet-revive holds a refundable deposit per stored byte (0.06 tPOT/byte), which exceeds the faucet's 10 tPOT per 24h limit. The dry run fails with `revive.StorageDepositNotEnoughFunds`. The deploy script (`npm run deploy:portaldot`, `scripts/deploy-revive.mjs`) is ready. Once the deployer account (`5EF5BYAngjNb8pcE6Xsgi37Td1AsommDjcuj8PMKKCw2vhCg`) is funded, running it deploys the contract and sets `registryAddress` in `public/config.json` automatically.

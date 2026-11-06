@@ -5,6 +5,8 @@ import { fmt, isNative, makeEthCall, parseUnits, readGrant, readGrantCount, shor
 import { restoreSession, toEvm, type Session, type Unlocker, type Wallet } from "../lib/wallet";
 import LoginDialog from "../components/LoginDialog";
 import UnlockDialog from "../components/UnlockDialog";
+import { loadBook, saveBook, type Book } from "../lib/addressBook";
+import { isSs58 } from "../lib/chain";
 import GrantTrack from "../components/GrantTrack";
 import NewGrant, { type NewGrantParams } from "../components/NewGrant";
 import { Mark } from "../components/Icons";
@@ -21,11 +23,18 @@ export default function Page() {
   const [loginOpen, setLoginOpen] = useState(false);
   const account = wallet?.evm ?? null;
   const [restoring, setRestoring] = useState(true);
+  const [book, setBook] = useState<Book>({});
+  useEffect(() => { setBook(loadBook()); }, []);
+  const remember = useCallback((pairs: [string, string][]) => setBook((old) => {
+    const next = { ...old }; let changed = false;
+    for (const [evm, ss58] of pairs) if (next[evm.toLowerCase()] !== ss58) { next[evm.toLowerCase()] = ss58; changed = true; }
+    if (!changed) return old; saveBook(next); return next;
+  }), []);
   const [unlockReq, setUnlockReq] = useState<{ attempt: (pw: string) => void; done: () => void; cancel: () => void } | null>(null);
   const unlocker: Unlocker = useCallback((attempt) => new Promise<void>((resolve, reject) => {
     setUnlockReq({ attempt, done: () => { setUnlockReq(null); resolve(); }, cancel: () => { setUnlockReq(null); reject(new Error("Signing cancelled.")); } });
   }), []);
-  const setLogin = (w: Wallet) => { setWallet(w); try { localStorage.setItem(SESSION_KEY, JSON.stringify(w.session)); localStorage.removeItem("ext-account"); } catch {} };
+  const setLogin = (w: Wallet) => { setWallet(w); remember([[w.evm, w.ss58]]); try { localStorage.setItem(SESSION_KEY, JSON.stringify(w.session)); localStorage.removeItem("ext-account"); } catch {} };
   const [copied, setCopied] = useState(false);
   const copyAddress = async () => {
     if (!wallet) return;
@@ -61,8 +70,8 @@ export default function Page() {
       else { const ext = localStorage.getItem("ext-account"); if (ext) saved = { kind: "extension", address: ext, name: "Account" }; } // sessions saved by older versions
     } catch {}
     if (!saved || !saved.address) { setRestoring(false); return; }
-    void restoreSession(cfg, saved, unlocker).then((w) => { if (w) setWallet(w); setRestoring(false); });
-  }, [cfg, unlocker]);
+    void restoreSession(cfg, saved, unlocker).then((w) => { if (w) { setWallet(w); remember([[w.evm, w.ss58]]); } setRestoring(false); });
+  }, [cfg, unlocker, remember]);
 
   const load = useCallback(async () => {
     if (!cfg) return;
@@ -105,6 +114,9 @@ export default function Page() {
       }
       say({ text: "Sign the grant with your account…", tone: "info" });
       const recipient = await toEvm(p.recipient, cfg), reviewers = await Promise.all(p.reviewers.map((r) => toEvm(r, cfg)));
+      if (new Set(reviewers.map((r) => r.toLowerCase())).size !== reviewers.length) throw new Error("Two of the reviewers are the same account (a 5… and a 0x… address can point to one account).");
+      const typed = [p.recipient, ...p.reviewers], evms = [recipient, ...reviewers];
+      remember(typed.flatMap((a, i): [string, string][] => (isSs58(a) ? [[evms[i], a.trim()]] : []))); // keep the 5… form to show later
       await wallet!.send(cfg.registryAddress, calls.createGrant({ token, recipient, deadline, threshold: p.threshold, repo: p.repo, reviewers, amounts }), native ? total : "0");
       say({ text: "Grant funded.", tone: "ok" });
       await load();
@@ -157,7 +169,7 @@ export default function Page() {
             {list.kind === "unconfigured" && <p className="empty">No registry is connected yet. Deploy the contract and set <span className="mono">registryAddress</span> in <span className="mono">public/config.json</span>.</p>}
             {list.kind === "empty" && <p className="empty">No grants yet. Fund the first one with the form.</p>}
             {list.kind === "error" && <p className="empty bad">Could not read the chain: {list.text}. Check the RPC URL and the registry address in <span className="mono">public/config.json</span>.</p>}
-            {cfg && grants.map((g) => <GrantTrack key={g.id} g={g} symbol={cfg.nativeSymbol} decimals={cfg.nativeDecimals} account={account} now={now} run={run} />)}
+            {cfg && grants.map((g) => <GrantTrack key={g.id} g={g} symbol={cfg.nativeSymbol} decimals={cfg.nativeDecimals} account={account} now={now} run={run} book={book} />)}
           </section>
           <aside>{cfg && <NewGrant cfg={cfg} blocker={blocker} busy={busy} onCreate={create} />}</aside>
         </div>

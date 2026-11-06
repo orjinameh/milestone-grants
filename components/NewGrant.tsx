@@ -48,7 +48,7 @@ export default function NewGrant({ cfg, blocker, busy, onCreate }: Props) {
     <form className="panel" onSubmit={submit} id="new" noValidate>
       <h2>New grant</h2>
       <label>Who receives the funds
-        <input className="mono" value={recipient} onChange={(e) => setRecipient(e.target.value)} placeholder="0x…" spellCheck={false} aria-invalid={recipient !== "" && !isAddress(recipient)} />
+        <input className="mono" value={recipient} onChange={(e) => setRecipient(e.target.value)} placeholder="5… or 0x…" spellCheck={false} aria-invalid={recipient !== "" && !isAddress(recipient)} />
       </label>
       {recipient !== "" && !isAddress(recipient) && <p className="field-err">That is not a valid address.</p>}
       <label>GitHub repository
@@ -73,13 +73,13 @@ export default function NewGrant({ cfg, blocker, busy, onCreate }: Props) {
         {reviewers.length > 0 && (
           <ul className="chips">
             {reviewers.map((r) => (
-              <li key={r}><span className="mono">{r.slice(0, 6)}…{r.slice(-4)}</span>
+              <li key={r}><span className="mono" title={r}>{r.slice(0, 6)}…{r.slice(-4)}</span>
                 <button type="button" className="icon" aria-label={`Remove reviewer ${r}`} onClick={() => setReviewers(reviewers.filter((x) => x !== r))}><Cross /></button></li>
             ))}
           </ul>
         )}
         <div className="line">
-          <input className="mono" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addReviewer(); } }} placeholder="Reviewer address 0x…" spellCheck={false} aria-label="Reviewer address" />
+          <input className="mono" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addReviewer(); } }} placeholder="Reviewer address 5… or 0x…" spellCheck={false} aria-label="Reviewer address" />
           <button type="button" className="btn btn-quiet" onClick={addReviewer} disabled={!isAddress(draft)}>Add</button>
         </div>
         {reviewers.length > 0 && (
@@ -104,7 +104,7 @@ export default function NewGrant({ cfg, blocker, busy, onCreate }: Props) {
       <details className="more">
         <summary>Pay in a token instead of {cfg.nativeSymbol}</summary>
         <label>Token contract address
-          <input className="mono" value={token} onChange={(e) => setToken(e.target.value)} placeholder="0x… (leave empty for native)" spellCheck={false} />
+          <input className="mono" value={token} onChange={(e) => setToken(e.target.value)} placeholder="Token contract 0x… (leave empty for native)" spellCheck={false} />
         </label>
         <p className="hint">You will approve the token transfer first, then fund the grant. Amounts use 18 decimals.</p>
       </details>
