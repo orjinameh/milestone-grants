@@ -1,15 +1,18 @@
-// The contract sees every account as a 20-byte address (pallet-revive derives it from the 5… account with a one-way
-// hash), so on-chain data comes back as 0x…. This remembers, in this browser, which 5… account each 0x… belongs to
-// (your own login, and any 5… address you typed as recipient or reviewer) so the app can show the Substrate form.
-export type Book = Record<string, string>; // lowercase 0x… -> 5…
-const KEY = "mg-address-book";
+// The contract stores accounts as 32-byte AccountId32 values (the public key behind a 5… address). This turns those
+// ids into the 5… form for display; nothing is stored in the browser.
+import { fromAccountId } from "./wallet";
 
-export function loadBook(): Book {
-  try { const b = JSON.parse(localStorage.getItem(KEY) ?? "{}"); return b && typeof b === "object" ? b : {}; } catch { return {}; }
+export type Book = Record<string, string>; // lowercase AccountId hex -> 5… address
+
+/** The 5… address to show for an id (falls back to the raw id only if encoding failed). */
+export const shown = (book: Book, id: string) => book[id.toLowerCase()] ?? id;
+
+/** Encodes every id once. The logged-in account keeps exactly the address string the wallet reported. */
+export async function buildBook(ids: string[], ss58Format: number, own?: { id: string; ss58: string }): Promise<Book> {
+  const book: Book = {};
+  for (const id of new Set(ids.map((i) => i.toLowerCase()))) {
+    try { book[id] = await fromAccountId(id, ss58Format); } catch { /* shown() falls back to the id */ }
+  }
+  if (own) book[own.id.toLowerCase()] = own.ss58;
+  return book;
 }
-export function saveBook(b: Book) { try { localStorage.setItem(KEY, JSON.stringify(b)); } catch {} }
-
-/** The address to show: the 5… form when known, otherwise the 0x… the chain gave us. */
-export const shown = (book: Book, evm: string) => book[evm.toLowerCase()] ?? evm;
-/** Tooltip with both forms. */
-export const both = (book: Book, evm: string) => (book[evm.toLowerCase()] ? `${book[evm.toLowerCase()]}\nEVM ${evm}` : evm);

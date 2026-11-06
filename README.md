@@ -12,7 +12,7 @@ unreleased.
 commit message, author and whether it was authored *before or after* the grant was created.
 
 ## Contract: `contracts/MilestoneGrants.sol`
-- `createGrant(CreateParams)` payable — native or ERC-20 (via `transferFrom`), ≤10 reviewers, ≤10 milestones, M-of-N threshold
+- `createGrant(CreateParams)` payable — native or ERC-20 (via `transferFrom`), accounts passed as 32-byte AccountId32 values, ≤10 reviewers, ≤10 milestones, M-of-N threshold
 - `claimMilestone(id, index, commit, evidence)` — recipient only, in order, before the deadline
 - `approveMilestone(id, index)` — reviewers only, one vote each, auto-release at threshold
 - `reclaim(id)` — funder only, after the deadline, refunds `total - released`
@@ -38,7 +38,7 @@ Network: chain ID `420420777`, EVM RPC `https://test-evm-rpc-v3.portaldot.dev`.
 
 ## Login (Portaldot Substrate accounts, address starts with 5)
 Three ways in, all giving the same account type: browser extension (desktop, or Orion on mobile), keystore JSON + password, and the account info JSON alongside the keystore. Keys are decrypted in the browser only. Writes are signed as `revive.call` extrinsics (Portaldot V3 runs pallet-revive), after a `reviveApi.call` dry run for weight and deposit limits. A `5…` account acts on the contract as the address keccak256(publicKey)[12..].
-`public/config.json` holds `wsUrl` (`wss://test-node-v3.portaldot.dev`). Recipients and reviewers may be entered as `5…` or `0x…`. The contract itself works with 20-byte addresses (`address` in Solidity, as on every pallet-revive chain), so on-chain data comes back as `0x…`; the app remembers the `5…` form of your own account and of any `5…` address you enter, and shows that form where it knows it.
+`public/config.json` holds `wsUrl` (`wss://test-node-v3.portaldot.dev`). Everything is a Substrate account. Recipients, reviewers and tokens are entered as `5…` addresses; the contract takes and returns them as 32-byte account ids (`bytes32`) and derives the 20-byte address its payments need with the same rule pallet-revive uses (Ethereum-derived accounts, including contracts, use the first 20 bytes; every other account uses the last 20 bytes of `keccak256(accountId)`). The funder id in `createGrant` is checked against the caller, so ids cannot be faked. The app never shows or accepts `0x…` addresses; `registryAddress` in `config.json` and the EVM RPC are internal plumbing. A token is entered as the `5…` form of its contract account.
 
 ## Disclosure
 Runtime: Next.js and React only; the contract client has no third-party code. Dev tooling: Hardhat, ethers, TypeScript, tsx. Built with AI assistance (Claude).

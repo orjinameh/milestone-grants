@@ -4,7 +4,7 @@ import { calls } from "../lib/api";
 import { currentMilestone, fmt, isNative, short, timeLeft, yourMove, type GrantView } from "../lib/chain";
 import Rail from "./Rail";
 import MilestoneDetail, { type Run } from "./MilestoneDetail";
-import { both, shown, type Book } from "../lib/addressBook";
+import { shown, type Book } from "../lib/addressBook";
 
 interface Props { g: GrantView; symbol: string; decimals: number; account: string | null; now: number; run: Run; book: Book }
 
@@ -24,7 +24,7 @@ export default function GrantTrack({ g, symbol, decimals, account, now, run, boo
         <div>
           <h3 id={`g${g.id}`}>{g.repo}</h3>
           <p className="parties">
-            <span className="mono" title={both(book, g.funder)}>{short(shown(book, g.funder))}</span> funds <span className="mono" title={both(book, g.recipient)}>{short(shown(book, g.recipient))}</span>
+            <span className="mono" title={shown(book, g.funder)}>{short(shown(book, g.funder))}</span> funds <span className="mono" title={shown(book, g.recipient)}>{short(shown(book, g.recipient))}</span>
           </p>
         </div>
         <div className="track-side">
@@ -54,7 +54,7 @@ export default function GrantTrack({ g, symbol, decimals, account, now, run, boo
       )}
       <details className="reviewers">
         <summary>Reviewers ({g.reviewers.length})</summary>
-        <ul>{g.reviewers.map((r) => <li key={r} className="mono" title={both(book, r)}>{shown(book, r)}</li>)}</ul>
+        <ul>{g.reviewers.map((r) => <li key={r} className="mono" title={shown(book, r)}>{shown(book, r)}</li>)}</ul>
       </details>
     </article>
   );

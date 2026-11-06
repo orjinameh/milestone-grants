@@ -1,5 +1,5 @@
 import { calls } from "./api";
-import { words, wBig, wAddr, wBytes20, decodeString } from "./abi";
+import { words, wBig, wId, wBytes20, decodeString } from "./abi";
 
 export interface Config { registryAddress: string; chainId: number; chainName: string; rpcUrl: string; nativeSymbol: string; nativeDecimals: number; wsUrl?: string; ss58Format?: number }
 export interface Eip1193 { request(a: { method: string; params?: unknown[] }): Promise<any>; on?(e: string, f: () => void): void }
@@ -26,6 +26,7 @@ export function fmt(wei: bigint, dec: number): string {
   return f ? `${i}.${f}` : i;
 }
 
+/** `account` / `viewer` below are AccountId32 hex values (0x + 64 digits): the public key behind a 5… address. */
 /** Public RPC first, wallet provider as fallback. Failures are surfaced, never papered over. */
 export function makeEthCall(cfg: Config, eth: Eip1193 | undefined, walletOnRightChain: boolean): EthCall {
   return async (data) => {
@@ -33,11 +34,8 @@ export function makeEthCall(cfg: Config, eth: Eip1193 | undefined, walletOnRight
     try {
       const r = await fetch(cfg.rpcUrl, { method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params }) });
-      if (!r.ok) throw new Error(`RPC returned HTTP ${r.status}`);
       const j = await r.json();
-      if (j.error) throw new Error(j.error.message || "RPC error");
-      if (typeof j.result !== "string") throw new Error("RPC gave no result for eth_call");
-      if (j.result === "0x") throw new Error(`No contract found at ${cfg.registryAddress} on ${cfg.chainName} (deploy it, then set registryAddress)`);
+      if (j.error) throw new Error(j.error.message);
       return j.result;
     } catch (e) {
       if (eth && walletOnRightChain) return eth.request({ method: "eth_call", params });
@@ -55,16 +53,16 @@ export async function readGrant(call: EthCall, id: number, viewer?: string | nul
   const nr = Number(wBig(w[9])), nm = Number(wBig(w[10]));
   const repo = decodeString(await call(calls.repoOf(id)));
   const reviewers: string[] = [];
-  for (let i = 0; i < nr; i++) reviewers.push(wAddr(words(await call(calls.reviewerAt(id, i)))[0]));
+  for (let i = 0; i < nr; i++) reviewers.push(wId(words(await call(calls.reviewerAt(id, i)))[0]));
   const milestones: MilestoneView[] = [];
   for (let i = 0; i < nm; i++) {
     const m = words(await call(calls.milestoneInfo(id, i)));
     const status = Number(wBig(m[1]));
     milestones.push({ amount: wBig(m[0]), status, approvals: Number(wBig(m[2])), commit: wBytes20(m[3]),
       evidence: status >= 1 ? decodeString(await call(calls.evidenceOf(id, i))) : "",
-      viewerVoted: viewer && status === 1 ? wBig(words(await call(calls.voted(id, i, viewer)))[0]) === 1n : undefined });
+      viewerVoted: viewer && status === 1 ? wBig(words(await call(calls.hasVoted(id, i, viewer)))[0]) === 1n : undefined });
   }
-  return { id, funder: wAddr(w[0]), token: wAddr(w[1]), recipient: wAddr(w[2]), total: wBig(w[3]), released: wBig(w[4]),
+  return { id, funder: wId(w[0]), token: wId(w[1]), recipient: wId(w[2]), total: wBig(w[3]), released: wBig(w[4]),
     createdAt: Number(wBig(w[5])), deadline: Number(wBig(w[6])), threshold: Number(wBig(w[7])), closed: wBig(w[8]) === 1n,
     repo, reviewers, milestones };
 }
@@ -82,7 +80,8 @@ export async function sendTx(eth: Eip1193 | undefined, from: string | null, to: 
 }
 
 export const isSs58 = (a: string) => /^5[1-9A-HJ-NP-Za-km-z]{46,47}$/.test(a.trim());
-export const isAddress = (a: string) => /^0x[0-9a-fA-F]{40}$/.test(a.trim()) || isSs58(a);
+/** Accounts are Substrate (5…) addresses only. */
+export const isAddress = (a: string) => isSs58(a);
 export const isRepo = (r: string) => /^[\w.-]+\/[\w.-]+$/.test(r.trim());
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 export function timeLeft(deadline: number, now: number): string {

@@ -28,6 +28,13 @@ test("dynamic tuple is a single offset word; static tuple is inline", () => {
   assert.equal(isDynamic({ tuple: ["uint", "address"] }), false);
   assert.equal(encodeParams([{ tuple: ["uint", "address"] }], [[1, "0x" + "11".repeat(20)]]).length, 64);
 });
+test("bytes32[] is dynamic and encodes length + one word per id", () => {
+  assert.equal(isDynamic("bytes32[]"), true);
+  const id = (n: string) => "0x" + n.repeat(32);
+  const enc = encodeParams(["bytes32[]"], [[id("11"), id("22")]]);
+  assert.equal(enc.length, 32 * 4);                       // offset, length, two ids
+  assert.equal(bytesToHex(enc.slice(32 * 2, 32 * 3)), id("11"));
+});
 test("github lookup validates inputs without network", async () => {
   assert.equal((await lookupCommit("bad repo", "a".repeat(40))).ok, false);
   assert.equal((await lookupCommit("a/b", "xyz")).ok, false);

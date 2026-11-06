@@ -25,11 +25,11 @@ export default function NewGrant({ cfg, blocker, busy, onCreate }: Props) {
   const sym = token.trim() ? "token units" : cfg.nativeSymbol;
 
   const problems: string[] = [];
-  if (!isAddress(recipient)) problems.push("Add the recipient's address.");
+  if (!isAddress(recipient)) problems.push("Add the recipient's Substrate address (starts with 5).");
   if (!isRepo(repo)) problems.push("Add the GitHub repo as owner/name.");
   if (!parsed.length || parsed.length !== amounts.filter((a) => a.trim()).length) problems.push("Add at least one valid milestone amount.");
   if (!reviewers.length) problems.push("Add at least one reviewer.");
-  if (token.trim() && !isAddress(token)) problems.push("The token address is not valid.");
+  if (token.trim() && !isAddress(token)) problems.push("The token address is not valid (it should start with 5).");
   const reason = blocker ?? problems[0] ?? null;
 
   const addReviewer = () => {
@@ -48,9 +48,9 @@ export default function NewGrant({ cfg, blocker, busy, onCreate }: Props) {
     <form className="panel" onSubmit={submit} id="new" noValidate>
       <h2>New grant</h2>
       <label>Who receives the funds
-        <input className="mono" value={recipient} onChange={(e) => setRecipient(e.target.value)} placeholder="5… or 0x…" spellCheck={false} aria-invalid={recipient !== "" && !isAddress(recipient)} />
+        <input className="mono" value={recipient} onChange={(e) => setRecipient(e.target.value)} placeholder="5…" spellCheck={false} aria-invalid={recipient !== "" && !isAddress(recipient)} />
       </label>
-      {recipient !== "" && !isAddress(recipient) && <p className="field-err">That is not a valid address.</p>}
+      {recipient !== "" && !isAddress(recipient) && <p className="field-err">Use a Substrate address (starts with 5).</p>}
       <label>GitHub repository
         <input value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="owner/name" spellCheck={false} aria-invalid={repo !== "" && !isRepo(repo)} />
       </label>
@@ -79,7 +79,7 @@ export default function NewGrant({ cfg, blocker, busy, onCreate }: Props) {
           </ul>
         )}
         <div className="line">
-          <input className="mono" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addReviewer(); } }} placeholder="Reviewer address 5… or 0x…" spellCheck={false} aria-label="Reviewer address" />
+          <input className="mono" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addReviewer(); } }} placeholder="Reviewer address 5…" spellCheck={false} aria-label="Reviewer address" />
           <button type="button" className="btn btn-quiet" onClick={addReviewer} disabled={!isAddress(draft)}>Add</button>
         </div>
         {reviewers.length > 0 && (
@@ -104,7 +104,7 @@ export default function NewGrant({ cfg, blocker, busy, onCreate }: Props) {
       <details className="more">
         <summary>Pay in a token instead of {cfg.nativeSymbol}</summary>
         <label>Token contract address
-          <input className="mono" value={token} onChange={(e) => setToken(e.target.value)} placeholder="Token contract 0x… (leave empty for native)" spellCheck={false} />
+          <input className="mono" value={token} onChange={(e) => setToken(e.target.value)} placeholder="Token contract 5… (leave empty for native POT)" spellCheck={false} />
         </label>
         <p className="hint">You will approve the token transfer first, then fund the grant. Amounts use 18 decimals.</p>
       </details>

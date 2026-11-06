@@ -14,7 +14,8 @@ export type LoginKind = "extension" | "keystore" | "both" | "info";
 export interface Session { kind: LoginKind; address: string; name: string; ss58Format?: number; keystore?: any }
 /** Asks the user for the keystore password; `attempt` throws on a wrong one so the dialog can show it and retry. */
 export type Unlocker = (attempt: (password: string) => void) => Promise<void>;
-export interface Wallet { kind: LoginKind; name: string; ss58: string; evm: string; session: Session; send(to: string, data: string, value?: string): Promise<string> }
+/** `id` is the account's 32-byte AccountId32 as hex (the public key behind `ss58`); it is what the contract stores. */
+export interface Wallet { kind: LoginKind; name: string; ss58: string; id: string; session: Session; send(to: string, data: string, value?: string): Promise<string> }
 export interface AccountInfo { address?: string; name?: string; ss58Format?: number }
 export interface ParsedFile { kind: "keystore" | "info"; keystore?: any; info?: AccountInfo }
 
@@ -35,14 +36,27 @@ const rpc = async (url: string, method: string, params: unknown[]) => {
   const j = await r.json(); if (j.error) throw new Error(j.error.message); return j.result as string;
 };
 
-/** Substrate account to the 20-byte address the contract sees as msg.sender (pallet-revive default mapper). */
-export async function toEvm(address: string, _cfg?: Config): Promise<string> {
-  if (/^0x[0-9a-fA-F]{40}$/.test(address)) return address;
-  const { decodeAddress, keccakAsU8a } = await load(() => import("@polkadot/util-crypto"));
+/** 5… address to the 32-byte AccountId32 hex the contract takes. */
+export async function toAccountId(address: string): Promise<string> {
+  const { decodeAddress } = await load(() => import("@polkadot/util-crypto"));
   const { u8aToHex } = await load(() => import("@polkadot/util"));
-  const pk = decodeAddress(address);
-  if (pk.slice(20).every((b) => b === 0xee)) return u8aToHex(pk.slice(0, 20)); // account derived from an eth address
-  return u8aToHex(keccakAsU8a(pk).slice(12));
+  try { return u8aToHex(decodeAddress(address.trim())); } catch { throw new Error(`"${address.trim()}" is not a valid Substrate address.`); }
+}
+/** AccountId32 hex back to a 5… address. */
+export async function fromAccountId(id: string, ss58Format: number): Promise<string> {
+  const { encodeAddress } = await load(() => import("@polkadot/util-crypto"));
+  const { hexToU8a } = await load(() => import("@polkadot/util"));
+  return encodeAddress(hexToU8a(id), ss58Format);
+}
+/** Plumbing only, never shown: a contract's account is its 20-byte address plus 12 bytes of 0xEE, and revive.call
+ *  needs the 20-byte form as its target. Rejects accounts that are not contracts. */
+export async function contractTarget(address: string): Promise<string> {
+  const { decodeAddress } = await load(() => import("@polkadot/util-crypto"));
+  const { u8aToHex } = await load(() => import("@polkadot/util"));
+  let pk: Uint8Array;
+  try { pk = decodeAddress(address.trim()); } catch { throw new Error(`"${address.trim()}" is not a valid Substrate address.`); }
+  if (!pk.slice(20).every((b) => b === 0xee)) throw new Error("That address is not a token contract.");
+  return u8aToHex(pk.slice(0, 20));
 }
 
 async function connectApi(cfg: Config) {
@@ -54,7 +68,7 @@ async function connectApi(cfg: Config) {
 type Signer = { address: string; name: string; signer?: any; pair?: any; viewOnly?: boolean; unlock?: Unlocker };
 
 async function makeWallet(kind: LoginKind, who: Signer, cfg: Config, session: Session): Promise<Wallet> {
-  const evm = await toEvm(who.address, cfg);
+  const id = await toAccountId(who.address);
   let apiP: Promise<any> | undefined;
   const send = async (to: string, data: string, value?: string) => {
     if (who.viewOnly) throw new Error("This is a view-only login (account info file only). Log in with the extension or a keystore file to sign.");
@@ -81,7 +95,7 @@ async function makeWallet(kind: LoginKind, who: Signer, cfg: Config, session: Se
       }).catch(reject);
     });
   };
-  return { kind, name: who.name, ss58: who.address, evm, session, send };
+  return { kind, name: who.name, ss58: who.address, id, session, send };
 }
 
 /** 1. Browser extension. */
@@ -95,7 +109,6 @@ export async function loginExtension(cfg: Config): Promise<Wallet[]> {
   return Promise.all(accounts.map((a) => makeWallet("extension", { address: a.address, name: a.meta.name ?? "Account", signer: injector.signer }, cfg, { kind: "extension", address: a.address, name: a.meta.name ?? "Account" })));
 }
 
-const EVM20 = /^0x[0-9a-fA-F]{40}$/;
 const isObj = (v: unknown): v is Record<string, any> => !!v && typeof v === "object" && !Array.isArray(v);
 const firstOf = (vals: unknown[], type: "string" | "number") => vals.find((v) => typeof v === type && (type === "number" ? Number.isInteger(v) : !!v)) as any;
 
@@ -124,9 +137,9 @@ async function newKeyring(ss58Format: number) {
   return new Keyring({ type: "sr25519", ss58Format });
 }
 
-/** SS58 in the keyring's prefix; a 0x public key is encoded, a 0x 20-byte EVM address is kept as is. */
+/** SS58 in the keyring's prefix; a 0x 32-byte public key is encoded. */
 async function normAddress(keyring: any, raw: string): Promise<string> {
-  if (EVM20.test(raw)) return raw;
+  if (/^0x[0-9a-fA-F]{40}$/.test(raw)) throw new Error("The account info file has an EVM-style address. This app uses Substrate (5…) addresses only.");
   if (/^0x[0-9a-fA-F]{64}$/.test(raw)) { const { hexToU8a } = await load(() => import("@polkadot/util")); return keyring.encodeAddress(hexToU8a(raw)); }
   try { return keyring.encodeAddress(keyring.decodeAddress(raw)); } catch { throw new Error("The address in the account info file is not valid."); }
 }
@@ -154,7 +167,7 @@ export async function loginFiles(cfg: Config, files: { name: string; text: strin
   try { pair.decodePkcs8(password); } catch { throw new Error("Wrong password for this keystore."); }
   if (address) {
     const { u8aToHex } = await load(() => import("@polkadot/util"));
-    const same = EVM20.test(address) ? address.toLowerCase() === (await toEvm(pair.address, cfg)).toLowerCase() : u8aToHex(keyring.decodeAddress(address)) === u8aToHex(pair.publicKey);
+    const same = u8aToHex(keyring.decodeAddress(address)) === u8aToHex(pair.publicKey);
     if (!same) throw new Error("The account info file does not match this keystore.");
   }
   const name = info?.name ?? keystore.meta?.name ?? "Keystore account";

@@ -2,11 +2,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { calls } from "../lib/api";
 import { fmt, isNative, makeEthCall, parseUnits, readGrant, readGrantCount, short, type Config, type GrantView } from "../lib/chain";
-import { restoreSession, toEvm, type Session, type Unlocker, type Wallet } from "../lib/wallet";
+import { contractTarget, restoreSession, toAccountId, type Session, type Unlocker, type Wallet } from "../lib/wallet";
 import LoginDialog from "../components/LoginDialog";
 import UnlockDialog from "../components/UnlockDialog";
-import { loadBook, saveBook, type Book } from "../lib/addressBook";
-import { isSs58 } from "../lib/chain";
+import { buildBook, type Book } from "../lib/addressBook";
 import GrantTrack from "../components/GrantTrack";
 import NewGrant, { type NewGrantParams } from "../components/NewGrant";
 import { Mark } from "../components/Icons";
@@ -14,27 +13,21 @@ import type { Run } from "../components/MilestoneDetail";
 
 type Toast = { text: string; tone: "ok" | "bad" | "info" } | null;
 type ListState = { kind: "loading" | "unconfigured" | "empty" | "error" | "ready"; text?: string };
-const ZERO = "0x" + "00".repeat(20);
+const ZERO32 = "0x" + "00".repeat(32); // native POT
 const SESSION_KEY = "mg-session";
 
 export default function Page() {
   const [cfg, setCfg] = useState<Config | null>(null);
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [loginOpen, setLoginOpen] = useState(false);
-  const account = wallet?.evm ?? null;
+  const account = wallet?.id ?? null; // AccountId32 hex, what the contract stores
   const [restoring, setRestoring] = useState(true);
   const [book, setBook] = useState<Book>({});
-  useEffect(() => { setBook(loadBook()); }, []);
-  const remember = useCallback((pairs: [string, string][]) => setBook((old) => {
-    const next = { ...old }; let changed = false;
-    for (const [evm, ss58] of pairs) if (next[evm.toLowerCase()] !== ss58) { next[evm.toLowerCase()] = ss58; changed = true; }
-    if (!changed) return old; saveBook(next); return next;
-  }), []);
   const [unlockReq, setUnlockReq] = useState<{ attempt: (pw: string) => void; done: () => void; cancel: () => void } | null>(null);
   const unlocker: Unlocker = useCallback((attempt) => new Promise<void>((resolve, reject) => {
     setUnlockReq({ attempt, done: () => { setUnlockReq(null); resolve(); }, cancel: () => { setUnlockReq(null); reject(new Error("Signing cancelled.")); } });
   }), []);
-  const setLogin = (w: Wallet) => { setWallet(w); remember([[w.evm, w.ss58]]); try { localStorage.setItem(SESSION_KEY, JSON.stringify(w.session)); localStorage.removeItem("ext-account"); } catch {} };
+  const setLogin = (w: Wallet) => { setWallet(w); try { localStorage.setItem(SESSION_KEY, JSON.stringify(w.session)); localStorage.removeItem("ext-account"); } catch {} };
   const [copied, setCopied] = useState(false);
   const copyAddress = async () => {
     if (!wallet) return;
@@ -70,8 +63,8 @@ export default function Page() {
       else { const ext = localStorage.getItem("ext-account"); if (ext) saved = { kind: "extension", address: ext, name: "Account" }; } // sessions saved by older versions
     } catch {}
     if (!saved || !saved.address) { setRestoring(false); return; }
-    void restoreSession(cfg, saved, unlocker).then((w) => { if (w) { setWallet(w); remember([[w.evm, w.ss58]]); } setRestoring(false); });
-  }, [cfg, unlocker, remember]);
+    void restoreSession(cfg, saved, unlocker).then((w) => { if (w) setWallet(w); setRestoring(false); });
+  }, [cfg, unlocker]);
 
   const load = useCallback(async () => {
     if (!cfg) return;
@@ -82,13 +75,15 @@ export default function Page() {
       if (n === 0) { setGrants([]); return setList({ kind: "empty" }); }
       const ids: number[] = [];
       for (let id = n - 1; id >= Math.max(0, n - 20); id--) ids.push(id);
-      setGrants(await Promise.all(ids.map((id) => readGrant(call, id, account))));
+      const list = await Promise.all(ids.map((id) => readGrant(call, id, account)));
+      setBook(await buildBook(list.flatMap((g) => [g.funder, g.recipient, ...g.reviewers]), cfg.ss58Format ?? 42, wallet ? { id: wallet.id, ss58: wallet.ss58 } : undefined));
+      setGrants(list);
       setList({ kind: "ready" });
     } catch (e) {
       setGrants([]);
       setList({ kind: "error", text: (e as Error).message });
     }
-  }, [cfg, account]);
+  }, [cfg, account, wallet]);
   useEffect(() => { void load(); }, [load]);
 
   const run: Run = async (data, label) => {
@@ -105,19 +100,21 @@ export default function Page() {
     try {
       const amounts = p.amounts.map((a) => parseUnits(a, cfg.nativeDecimals));
       const total = amounts.reduce((s, a) => s + BigInt(a), 0n).toString();
-      const token = p.token || ZERO;
+      // Everything is a Substrate account: 5… addresses become the 32-byte ids the contract stores.
+      const funder = wallet!.id;
+      const recipient = await toAccountId(p.recipient);
+      const reviewers = await Promise.all(p.reviewers.map((r) => toAccountId(r)));
+      if (new Set(reviewers).size !== reviewers.length) throw new Error("Two of the reviewers are the same account.");
+      const token = p.token ? await toAccountId(p.token) : ZERO32;
       const native = isNative(token);
+      const tokenTarget = native ? "" : await contractTarget(p.token); // checked before anything is signed
       const deadline = Math.floor(Date.now() / 1000) + p.days * 86400;
       if (!native) {
         say({ text: "Approve the token transfer (sign with your account)…", tone: "info" });
-        await wallet!.send(token, calls.erc20Approve(cfg.registryAddress, total));
+        await wallet!.send(tokenTarget, calls.erc20Approve(cfg.registryAddress, total));
       }
       say({ text: "Sign the grant with your account…", tone: "info" });
-      const recipient = await toEvm(p.recipient, cfg), reviewers = await Promise.all(p.reviewers.map((r) => toEvm(r, cfg)));
-      if (new Set(reviewers.map((r) => r.toLowerCase())).size !== reviewers.length) throw new Error("Two of the reviewers are the same account (a 5… and a 0x… address can point to one account).");
-      const typed = [p.recipient, ...p.reviewers], evms = [recipient, ...reviewers];
-      remember(typed.flatMap((a, i): [string, string][] => (isSs58(a) ? [[evms[i], a.trim()]] : []))); // keep the 5… form to show later
-      await wallet!.send(cfg.registryAddress, calls.createGrant({ token, recipient, deadline, threshold: p.threshold, repo: p.repo, reviewers, amounts }), native ? total : "0");
+      await wallet!.send(cfg.registryAddress, calls.createGrant({ funder, token, recipient, deadline, threshold: p.threshold, repo: p.repo, reviewers, amounts }), native ? total : "0");
       say({ text: "Grant funded.", tone: "ok" });
       await load();
     } catch (e) { say({ text: (e as Error).message, tone: "bad" }); }
@@ -141,7 +138,7 @@ export default function Page() {
           <nav className="bar-r" aria-label="Wallet">
             <a className="bar-link" href="#new">New grant</a>
             {wallet
-              ? <><span className="wallet" title={`${wallet.ss58}\nEVM ${wallet.evm}`}><i className="dot ok" />{short(wallet.ss58)}</span><button className="btn btn-quiet" onClick={copyAddress} aria-label="Copy wallet address">{copied ? "Copied" : "Copy"}</button><button className="btn btn-quiet" onClick={logout}>Log out</button></>
+              ? <><span className="wallet" title={wallet.ss58}><i className="dot ok" />{short(wallet.ss58)}</span><button className="btn btn-quiet" onClick={copyAddress} aria-label="Copy wallet address">{copied ? "Copied" : "Copy"}</button><button className="btn btn-quiet" onClick={logout}>Log out</button></>
               : <button className="btn" onClick={() => setLoginOpen(true)} disabled={!cfg || restoring}>{restoring ? "Restoring…" : "Log in"}</button>}
           </nav>
         </div>

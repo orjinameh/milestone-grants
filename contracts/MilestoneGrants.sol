@@ -11,6 +11,11 @@ interface IERC20Min {
 ///         The recipient claims a milestone by anchoring a git commit hash (a 20-byte SHA-1) plus an evidence
 ///         URL; an M-of-N reviewer panel approves; when the threshold is reached the milestone's funds are
 ///         released automatically. After the deadline the funder can reclaim anything not yet released.
+///
+///         Accounts are Substrate accounts. Every account (funder, recipient, reviewers, token) goes in and comes out
+///         as its 32-byte AccountId32 (the 5... address). The contract derives the 20-byte address the EVM layer needs
+///         from it with the same rule pallet-revive uses, so the two can never disagree: the funder id must belong to
+///         the caller, and every other id maps to exactly one payable address.
 contract MilestoneGrants {
     enum Status { Pending, Claimed, Released }
 
@@ -26,6 +31,9 @@ contract MilestoneGrants {
         address funder;
         address token; // address(0) = native
         address recipient;
+        bytes32 funderId;
+        bytes32 tokenId; // 0 = native
+        bytes32 recipientId;
         uint128 total;
         uint128 released;
         uint64 createdAt;
@@ -34,23 +42,25 @@ contract MilestoneGrants {
         bool closed;
         string repo; // "owner/name" on GitHub, used by the UI to verify commits
         address[] reviewers;
+        bytes32[] reviewerIds;
         Milestone[] milestones;
     }
 
     struct CreateParams {
-        address token;
-        address recipient;
+        bytes32 funder; // the caller's own AccountId32
+        bytes32 token; // 0 = native POT, otherwise the token contract's account
+        bytes32 recipient;
         uint64 deadline;
         uint8 threshold;
         string repo;
-        address[] reviewers;
+        bytes32[] reviewers;
         uint128[] amounts;
     }
 
     struct GrantInfo {
-        address funder;
-        address token;
-        address recipient;
+        bytes32 funder;
+        bytes32 token;
+        bytes32 recipient;
         uint128 total;
         uint128 released;
         uint64 createdAt;
@@ -69,16 +79,16 @@ contract MilestoneGrants {
     }
 
     Grant[] private _grants;
-    mapping(uint256 => mapping(uint256 => mapping(address => bool))) public voted;
+    mapping(uint256 => mapping(uint256 => mapping(address => bool))) private _voted;
     uint256 private _lock = 1;
 
     event GrantCreated(
-        uint256 indexed id, address indexed funder, address indexed recipient, address token,
+        uint256 indexed id, bytes32 indexed funder, bytes32 indexed recipient, bytes32 token,
         uint256 total, uint64 deadline, string repo
     );
     event MilestoneClaimed(uint256 indexed id, uint256 indexed index, bytes20 commit, string evidence);
-    event MilestoneApproved(uint256 indexed id, uint256 indexed index, address indexed reviewer, uint8 approvals);
-    event MilestoneReleased(uint256 indexed id, uint256 indexed index, address indexed recipient, uint256 amount);
+    event MilestoneApproved(uint256 indexed id, uint256 indexed index, bytes32 indexed reviewer, uint8 approvals);
+    event MilestoneReleased(uint256 indexed id, uint256 indexed index, bytes32 indexed recipient, uint256 amount);
     event GrantClosed(uint256 indexed id, uint256 refunded);
 
     error BadParams();
@@ -104,49 +114,60 @@ contract MilestoneGrants {
     }
 
     function createGrant(CreateParams calldata p) external payable nonReentrant returns (uint256 id) {
-        uint256 nr = p.reviewers.length;
-        uint256 nm = p.amounts.length;
-        if (p.recipient == address(0)) revert BadParams();
-        if (nr == 0 || nr > 10 || p.threshold == 0 || p.threshold > nr) revert BadParams();
-        if (nm == 0 || nm > 10) revert BadParams();
-        if (p.deadline <= block.timestamp) revert BadParams();
+        uint256 total = _validate(p);
+        address token = p.token == bytes32(0) ? address(0) : _evm(p.token);
 
-        for (uint256 i = 0; i < nr; i++) {
-            if (p.reviewers[i] == address(0)) revert BadParams();
-            for (uint256 j = i + 1; j < nr; j++) {
-                if (p.reviewers[i] == p.reviewers[j]) revert BadParams();
-            }
-        }
-        uint256 total;
-        for (uint256 i = 0; i < nm; i++) {
-            if (p.amounts[i] == 0) revert BadParams();
-            total += p.amounts[i];
-        }
-        if (total > type(uint128).max) revert BadParams();
-
-        if (p.token == address(0)) {
+        if (token == address(0)) {
             if (msg.value != total) revert BadFunding();
         } else {
             if (msg.value != 0) revert BadFunding();
-            _pull(p.token, msg.sender, total);
+            _pull(token, msg.sender, total);
         }
 
         id = _grants.length;
         Grant storage g = _grants.push();
         g.funder = msg.sender;
-        g.token = p.token;
-        g.recipient = p.recipient;
+        g.funderId = p.funder;
+        g.token = token;
+        g.tokenId = p.token;
+        g.recipient = _evm(p.recipient);
+        g.recipientId = p.recipient;
         g.total = uint128(total);
         g.createdAt = uint64(block.timestamp);
         g.deadline = p.deadline;
         g.threshold = p.threshold;
         g.repo = p.repo;
-        for (uint256 i = 0; i < nr; i++) g.reviewers.push(p.reviewers[i]);
-        for (uint256 i = 0; i < nm; i++) {
+        for (uint256 i = 0; i < p.reviewers.length; i++) {
+            g.reviewers.push(_evm(p.reviewers[i]));
+            g.reviewerIds.push(p.reviewers[i]);
+        }
+        for (uint256 i = 0; i < p.amounts.length; i++) {
             Milestone storage m = g.milestones.push();
             m.amount = p.amounts[i];
         }
-        emit GrantCreated(id, msg.sender, p.recipient, p.token, total, p.deadline, p.repo);
+        emit GrantCreated(id, p.funder, p.recipient, p.token, total, p.deadline, p.repo);
+    }
+
+    function _validate(CreateParams calldata p) private view returns (uint256 total) {
+        uint256 nr = p.reviewers.length;
+        uint256 nm = p.amounts.length;
+        if (p.recipient == bytes32(0)) revert BadParams();
+        if (_evm(p.funder) != msg.sender) revert BadParams(); // the funder id must be the caller's own account
+        if (nr == 0 || nr > 10 || p.threshold == 0 || p.threshold > nr) revert BadParams();
+        if (nm == 0 || nm > 10) revert BadParams();
+        if (p.deadline <= block.timestamp) revert BadParams();
+
+        for (uint256 i = 0; i < nr; i++) {
+            if (p.reviewers[i] == bytes32(0)) revert BadParams();
+            for (uint256 j = i + 1; j < nr; j++) {
+                if (p.reviewers[i] == p.reviewers[j]) revert BadParams();
+            }
+        }
+        for (uint256 i = 0; i < nm; i++) {
+            if (p.amounts[i] == 0) revert BadParams();
+            total += p.amounts[i];
+        }
+        if (total > type(uint128).max) revert BadParams();
     }
 
     /// @notice Recipient claims the next milestone by anchoring the git commit that delivers it.
@@ -173,18 +194,19 @@ contract MilestoneGrants {
     function approveMilestone(uint256 id, uint256 index) external nonReentrant {
         Grant storage g = _grant(id);
         if (g.closed) revert Closed();
-        if (!_isReviewer(g, msg.sender)) revert NotReviewer();
+        (bool isReviewer, uint256 ri) = _reviewerIndex(g, msg.sender);
+        if (!isReviewer) revert NotReviewer();
         if (index >= g.milestones.length) revert BadParams();
         Milestone storage m = g.milestones[index];
         if (m.status != Status.Claimed) revert BadStatus();
-        if (voted[id][index][msg.sender]) revert AlreadyVoted();
-        voted[id][index][msg.sender] = true;
+        if (_voted[id][index][msg.sender]) revert AlreadyVoted();
+        _voted[id][index][msg.sender] = true;
         m.approvals += 1;
-        emit MilestoneApproved(id, index, msg.sender, m.approvals);
+        emit MilestoneApproved(id, index, g.reviewerIds[ri], m.approvals);
         if (m.approvals >= g.threshold) {
             m.status = Status.Released;
             g.released += m.amount;
-            emit MilestoneReleased(id, index, g.recipient, m.amount);
+            emit MilestoneReleased(id, index, g.recipientId, m.amount);
             _pay(g.token, g.recipient, m.amount);
         }
     }
@@ -208,9 +230,9 @@ contract MilestoneGrants {
 
     function grantInfo(uint256 id) external view returns (GrantInfo memory r) {
         Grant storage g = _grant(id);
-        r.funder = g.funder;
-        r.token = g.token;
-        r.recipient = g.recipient;
+        r.funder = g.funderId;
+        r.token = g.tokenId;
+        r.recipient = g.recipientId;
         r.total = g.total;
         r.released = g.released;
         r.createdAt = g.createdAt;
@@ -231,10 +253,14 @@ contract MilestoneGrants {
         r.commit = m.commit;
     }
 
-    function reviewerAt(uint256 id, uint256 index) external view returns (address) {
+    function reviewerAt(uint256 id, uint256 index) external view returns (bytes32) {
         Grant storage g = _grant(id);
-        if (index >= g.reviewers.length) revert BadParams();
-        return g.reviewers[index];
+        if (index >= g.reviewerIds.length) revert BadParams();
+        return g.reviewerIds[index];
+    }
+
+    function hasVoted(uint256 id, uint256 index, bytes32 who) external view returns (bool) {
+        return _voted[id][index][_evm(who)];
     }
 
     function repoOf(uint256 id) external view returns (string memory) {
@@ -253,12 +279,20 @@ contract MilestoneGrants {
         return _grants[id];
     }
 
-    function _isReviewer(Grant storage g, address who) private view returns (bool) {
+    function _reviewerIndex(Grant storage g, address who) private view returns (bool, uint256) {
         uint256 n = g.reviewers.length;
         for (uint256 i = 0; i < n; i++) {
-            if (g.reviewers[i] == who) return true;
+            if (g.reviewers[i] == who) return (true, i);
         }
-        return false;
+        return (false, 0);
+    }
+
+    /// @dev The 20-byte address pallet-revive's default mapper gives an AccountId32: accounts derived from an
+    ///      Ethereum address (last 12 bytes all 0xEE, which includes every contract) use the first 20 bytes,
+    ///      every other account uses the last 20 bytes of keccak256(accountId).
+    function _evm(bytes32 id) private pure returns (address) {
+        if (uint96(uint256(id)) == 0xEEEEEEEEEEEEEEEEEEEEEEEE) return address(bytes20(id));
+        return address(uint160(uint256(keccak256(abi.encodePacked(id)))));
     }
 
     function _pull(address token, address from, uint256 amount) private {

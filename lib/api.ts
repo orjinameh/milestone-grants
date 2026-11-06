@@ -1,8 +1,9 @@
 // Contract call descriptors for MilestoneGrants.
 import { encodeCall, type AbiType } from "./abi";
-const CP: AbiType = { tuple: ["address", "address", "uint", "uint", "string", "address[]", "uint[]"] };
+// Accounts cross the contract boundary as 32-byte AccountId32 values (the public key behind a 5… address).
+const CP: AbiType = { tuple: ["bytes32", "bytes32", "bytes32", "uint", "uint", "string", "bytes32[]", "uint[]"] };
 export const SIG = {
-  createGrant: "createGrant((address,address,uint64,uint8,string,address[],uint128[]))",
+  createGrant: "createGrant((bytes32,bytes32,bytes32,uint64,uint8,string,bytes32[],uint128[]))",
   claimMilestone: "claimMilestone(uint256,uint256,bytes20,string)",
   approveMilestone: "approveMilestone(uint256,uint256)",
   reclaim: "reclaim(uint256)",
@@ -13,11 +14,11 @@ export const SIG = {
   repoOf: "repoOf(uint256)",
   evidenceOf: "evidenceOf(uint256,uint256)",
   erc20Approve: "approve(address,uint256)",
-  voted: "voted(uint256,uint256,address)",
+  hasVoted: "hasVoted(uint256,uint256,bytes32)",
 };
 export const calls = {
-  createGrant: (p: { token: string; recipient: string; deadline: number; threshold: number; repo: string; reviewers: string[]; amounts: string[] }) =>
-    encodeCall(SIG.createGrant, [CP], [[p.token, p.recipient, p.deadline, p.threshold, p.repo, p.reviewers, p.amounts]]),
+  createGrant: (p: { funder: string; token: string; recipient: string; deadline: number; threshold: number; repo: string; reviewers: string[]; amounts: string[] }) =>
+    encodeCall(SIG.createGrant, [CP], [[p.funder, p.token, p.recipient, p.deadline, p.threshold, p.repo, p.reviewers, p.amounts]]),
   claim: (id: number, i: number, commit: string, evidence: string) => encodeCall(SIG.claimMilestone, ["uint", "uint", "bytes20", "string"], [id, i, commit, evidence]),
   approve: (id: number, i: number) => encodeCall(SIG.approveMilestone, ["uint", "uint"], [id, i]),
   reclaim: (id: number) => encodeCall(SIG.reclaim, ["uint"], [id]),
@@ -27,6 +28,6 @@ export const calls = {
   reviewerAt: (id: number, i: number) => encodeCall(SIG.reviewerAt, ["uint", "uint"], [id, i]),
   repoOf: (id: number) => encodeCall(SIG.repoOf, ["uint"], [id]),
   evidenceOf: (id: number, i: number) => encodeCall(SIG.evidenceOf, ["uint", "uint"], [id, i]),
-  voted: (id: number, i: number, who: string) => encodeCall(SIG.voted, ["uint", "uint", "address"], [id, i, who]),
+  hasVoted: (id: number, i: number, who: string) => encodeCall(SIG.hasVoted, ["uint", "uint", "bytes32"], [id, i, who]),
   erc20Approve: (spender: string, amount: string) => encodeCall(SIG.erc20Approve, ["address", "uint"], [spender, amount]),
 };
