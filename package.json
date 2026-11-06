@@ -15,7 +15,7 @@
     "compile": "hardhat compile",
     "compile:pvm": "node scripts/compile-pvm.mjs",
     "test:contract": "hardhat test",
-    "deploy:portaldot": "node scripts/deploy-revive.mjs",
+    "deploy:portaldot": "node scripts/deploy-evm.mjs",
     "check:registry": "node scripts/check-registry.mjs"
   },
   "dependencies": {
