@@ -7,3 +7,5 @@ cache/
 next-env.d.ts
 *keystore*.json
 *.tsbuildinfo
+
+build/

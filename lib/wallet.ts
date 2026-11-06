@@ -16,7 +16,7 @@ export interface Session { kind: string; address: string; name: string; ss58Form
 /** Asks the user for the keystore password; `attempt` throws on a wrong one so the dialog can show it and retry. */
 export type Unlocker = (attempt: (password: string) => void) => Promise<void>;
 /** `id` is the account's 32-byte AccountId32 as hex (the public key behind `ss58`); it is what the contract stores. */
-export interface Wallet { kind: string; name: string; ss58: string; id: string; session: Session; send(to: string, data: string, value?: string): Promise<string> }
+export interface Wallet { kind: string; name: string; ss58: string; id: string; session: Session; send(to: string, data: string, value?: string): Promise<string>; activate?(): Promise<string> }
 export interface AccountInfo { address?: string; name?: string; ss58Format?: number }
 export interface ParsedFile { kind: "keystore" | "info"; keystore?: any; info?: AccountInfo }
 
@@ -93,13 +93,23 @@ type Signer = { address: string; name: string; signer?: any; pair?: any; viewOnl
 
 async function makeWallet(kind: string, who: Signer, cfg: Config, session: Session): Promise<Wallet> {
   const id = await toAccountId(who.address);
-  const send = async (to: string, data: string, value?: string) => {
+  const prepare = async () => {
     if (who.viewOnly) throw new Error("This is a view-only login (account info file only). Log in with the extension or a keystore file to sign.");
     if (who.pair?.isLocked) { // restored after a refresh: the key is still encrypted, ask for the password once
       if (!who.unlock) throw new Error("This keystore is locked. Log in again with the keystore file and password.");
       await who.unlock((pw) => who.pair.decodePkcs8(pw));
     }
-    const api = await getApi(cfg);
+    return getApi(cfg);
+  };
+  const signAndWait = (api: any, tx: any) => new Promise<string>((resolve, reject) => {
+    tx.signAndSend(who.pair ?? who.address, who.pair ? {} : { signer: who.signer }, (res: any) => {
+      if (!res.status.isInBlock && !res.status.isFinalized) return;
+      if (res.dispatchError || res.events.some(({ event }: any) => api.events.system.ExtrinsicFailed.is(event))) return reject(new Error("Transaction failed on-chain."));
+      resolve(tx.hash.toHex());
+    }).catch(reject);
+  });
+  const send = async (to: string, data: string, value?: string) => {
+    const api = await prepare();
     // Revive takes value in native units; the contract sees it scaled by NativeToEthRatio.
     const ratio = api.consts.revive?.nativeToEthRatio ? BigInt(api.consts.revive.nativeToEthRatio.toString()) : 10n ** BigInt(Math.max(0, cfg.nativeDecimals - (api.registry.chainDecimals[0] ?? cfg.nativeDecimals)));
     const nativeValue = (BigInt(value ?? "0") / ratio).toString();
@@ -108,16 +118,30 @@ async function makeWallet(kind: string, who: Signer, cfg: Config, session: Sessi
     if (dry.result.isErr) throw new Error("Transaction would revert (dry run failed).");
     const dep = dry.storageDeposit;
     const depositLimit = dep.isCharge ? dep.asCharge.toString() : "0";
-    const tx = api.tx.revive.call(to, nativeValue, dry.gasRequired, depositLimit, data);
-    return new Promise<string>((resolve, reject) => {
-      tx.signAndSend(who.pair ?? who.address, who.pair ? {} : { signer: who.signer }, (res: any) => {
-        if (!res.status.isInBlock && !res.status.isFinalized) return;
-        if (res.dispatchError || res.events.some(({ event }: any) => api.events.system.ExtrinsicFailed.is(event))) return reject(new Error("Transaction failed on-chain."));
-        resolve(tx.hash.toHex());
-      }).catch(reject);
-    });
+    return signAndWait(api, api.tx.revive.call(to, nativeValue, dry.gasRequired, depositLimit, data));
   };
-  return { kind, name: who.name, ss58: who.address, id, session, send };
+  const activate = async () => {
+    const api = await prepare();
+    if (!api.tx.revive?.mapAccount) throw new Error("This chain has no revive.mapAccount, so there is nothing to activate.");
+    return signAndWait(api, api.tx.revive.mapAccount());
+  };
+  return { kind, name: who.name, ss58: who.address, id, session, send, activate };
+}
+
+/** Can this account receive payouts from a contract? A contract pays a 20-byte address, and the chain turns it back into an account
+ *  only if that account has registered itself (revive.mapAccount, "activate"); otherwise the money goes to a placeholder account
+ *  nobody holds the key to. Accounts that came from an Ethereum address need nothing. Returns null when the chain cannot say. */
+export async function isActivated(cfg: Config, ss58: string): Promise<boolean | null> {
+  try {
+    const api = await getApi(cfg);
+    const { decodeAddress, keccakAsU8a } = await load(() => import("@polkadot/util-crypto"));
+    const { u8aToHex } = await load(() => import("@polkadot/util"));
+    const pk = decodeAddress(ss58.trim());
+    if (pk.slice(20).every((b: number) => b === 0xee)) return true;
+    const original = api.query.revive?.originalAccount;
+    if (!original) return null;
+    return (await original(u8aToHex(keccakAsU8a(pk).slice(12)))).isSome;
+  } catch { return null; }
 }
 
 /** 1. Browser extension. */

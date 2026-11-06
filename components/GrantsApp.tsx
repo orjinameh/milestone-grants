@@ -26,6 +26,8 @@ export interface Mode {
   init?(): void;
   /** Rebuilds a login after a refresh. `saved` is what was stored under sessionKey, if anything. */
   restore(saved: Session | null, unlock: Unlocker): Promise<Wallet | null>;
+  /** Can this account receive payouts? true/false, or null when unknown. Leave out when payouts need no setup. */
+  canReceive?: (ss58: string) => Promise<boolean | null>;
   /** Extra localStorage keys to clear on login and logout. */
   legacyKeys?: string[];
   Login: ComponentType<{ onWallet: (w: Wallet) => void; onClose: () => void }>;
@@ -68,6 +70,7 @@ export default function GrantsApp({ mode }: { mode: Mode }) {
   };
   const logout = () => { setWallet(null); try { localStorage.removeItem(mode.sessionKey); mode.legacyKeys?.forEach((k) => localStorage.removeItem(k)); } catch {} };
   const chainOk = !!wallet;
+  const [activated, setActivated] = useState<boolean | null>(null);
   const [grants, setGrants] = useState<GrantView[]>([]);
   const [list, setList] = useState<ListState>({ kind: "loading" });
   const [toast, setToast] = useState<Toast>(null);
@@ -104,6 +107,16 @@ export default function GrantsApp({ mode }: { mode: Mode }) {
     }
   }, [mode, cfg, account, wallet]);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    setActivated(null);
+    if (wallet && mode.canReceive) void mode.canReceive(wallet.ss58).then(setActivated);
+  }, [wallet, mode]);
+  const activate = async () => {
+    if (!wallet?.activate) return;
+    say({ text: "Activating your account (sign with your wallet)…", tone: "info" });
+    try { await wallet.activate(); setActivated(await mode.canReceive!(wallet.ss58)); say({ text: "Account activated. You can now receive payouts.", tone: "ok" }); }
+    catch (e) { say({ text: (e as Error).message, tone: "bad" }); }
+  };
 
   const run: Run = async (data, label) => {
     say({ text: label.pending, tone: "info" });
@@ -118,6 +131,13 @@ export default function GrantsApp({ mode }: { mode: Mode }) {
       const amounts = p.amounts.map((a) => parseUnits(a, cfg.nativeDecimals));
       const total = amounts.reduce((s, a) => s + BigInt(a), 0n).toString();
       // Everything is a Substrate account: 5… addresses become the 32-byte ids the contract stores.
+      if (mode.canReceive) { // payouts only reach an account that has activated itself; check before any money is locked
+        for (const [who, addr] of [["Your account", wallet!.ss58], ["The recipient's account", p.recipient.trim()]] as const) {
+          if (await mode.canReceive(addr) === false) throw new Error(who === "Your account"
+            ? "Activate your account first (button in the top bar). Without it, a refund could not reach you."
+            : "The recipient has to log in once and press Activate account first. Without it, payouts would not reach them.");
+        }
+      }
       const funder = wallet!.id;
       const recipient = await toAccountId(p.recipient);
       const reviewers = await Promise.all(p.reviewers.map((r) => toAccountId(r)));
@@ -155,6 +175,7 @@ export default function GrantsApp({ mode }: { mode: Mode }) {
           <span className="brand"><Mark /> Milestone Grants</span>
           <nav className="bar-r" aria-label="Wallet">
             <a className="bar-link" href="#new">New grant</a>
+            {wallet?.activate && activated === false && <button className="btn" onClick={activate} title="One-time setup so payouts can reach your account">Activate account</button>}
             {wallet
               ? <>{AccountSwitch
                   ? <AccountSwitch wallet={wallet} onPick={setLogin} />

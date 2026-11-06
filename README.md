@@ -61,12 +61,23 @@ deadline), so the UI code path is the production one.
 - Paying in a token is not available in the demo.
 
 ## Deploy to the Portaldot V3 testnet
-Everything is native: a Substrate account signs, reads are `reviveApi.call` dry runs, writes are `revive.call` extrinsics.
+The contract is deployed as a native PolkaVM contract: `scripts/compile-pvm.mjs` builds it with Parity's `resolc`, and a Substrate account signs
+`revive.instantiateWithCode`. Reads are `reviveApi.call` dry runs, writes are `revive.call` extrinsics.
 ```bash
-npm run compile
-KEYSTORE_FILE=./my-account.json npm run deploy:portaldot   # prints the cost, asks to confirm, then sets "registry" in public/config.json
-npm run dev
+npm install
+npm run test:contract                                       # 17 contract tests, in-process, no network
+KEYSTORE_FILE=./my-account.json npm run deploy:portaldot    # asks for the password, then for a final "y"
+npm run check:registry                                      # read-only: the deployed registry answers grantCount()
 ```
+Everything before the final "y" is read-only and free: the script compiles fresh, checks the account mapping against the chain, and dry-runs the
+deployment on the chain. If the chain would reject the contract, it prints the exact reason (for example `revive.BlobTooLarge`) and sends nothing.
+After a successful deploy it sets `registry` in `public/config.json`; commit that file.
+
+**Activate your account.** A contract pays a 20-byte address, and the chain turns that back into an account only if the account has registered
+itself once (`revive.mapAccount`). Otherwise a payout lands in a placeholder account nobody holds the key to. The app therefore shows an
+**Activate account** button for any logged-in account that has not done this, and refuses to create a grant if the funder or the recipient has not.
+Everyone who will receive money (funders for refunds, builders for payouts) activates once, with a small refundable deposit.
+
 `public/config.json`: `wsUrl` (`wss://test-node-v3.portaldot.dev`), `registry` (the contract's account as a `5…` address), `nativeSymbol`, `nativeDecimals`, `ss58Format`.
 
 ## Login (Portaldot Substrate accounts, address starts with 5)
@@ -82,7 +93,7 @@ WebSocket: wss://test-node-v3.portaldot.dev
 
 Status: Contract deployment pending.
 
-The contract compiles successfully, but the initial instantiation attempt failed during the dry run with error `0x17000000`. No deployment transaction was submitted, so a contract address and transaction hash are not yet available.
+The contract compiles to a native PolkaVM blob. An earlier instantiation attempt failed in the dry run with error `0x17000000`; no deployment transaction was submitted. The deploy script now compiles with `resolc` and prints the decoded reason for any dry-run failure.
 
 ## Development History
 

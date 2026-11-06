@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import GrantsApp, { type Mode } from "../components/GrantsApp";
 import LoginDialog from "../components/LoginDialog";
-import { makeCall, contractTarget, registryTarget, restoreSession } from "../lib/wallet";
+import { isActivated, makeCall, contractTarget, registryTarget, restoreSession } from "../lib/wallet";
 import type { Config } from "../lib/chain";
 
 const SESSION_KEY = "mg-session";
@@ -19,6 +19,7 @@ function realMode(cfg: Config): Mode {
     read: makeCall(cfg),
     registry: () => registryTarget(cfg),
     tokenTarget: contractTarget,
+    canReceive: (ss58) => isActivated(cfg, ss58),
     restore: async (saved, unlock) => {
       let s = saved;
       if (!s) { try { const ext = localStorage.getItem(LEGACY_KEY); if (ext) s = { kind: "extension", address: ext, name: "Account" }; } catch {} }
