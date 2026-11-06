@@ -2,7 +2,6 @@
 import { useState } from "react";
 import type { Config } from "../lib/chain";
 import { classify, loginExtension, loginFiles, type Wallet } from "../lib/wallet";
-import { DEMO_ACCOUNTS, demoWallet } from "../lib/demo";
 
 type Tab = "extension" | "keystore";
 type Entry = { name: string; text: string; kind?: "keystore" | "info"; error?: string };
@@ -32,17 +31,6 @@ export default function LoginDialog({ cfg, onWallet, onClose }: { cfg: Config; o
       return next;
     });
   };
-
-  if (cfg.demo) return (
-    <div className="dlg-back" role="dialog" aria-modal="true" aria-labelledby="dlg-h" onClick={onClose}>
-      <div className="dlg" onClick={(e) => e.stopPropagation()}>
-        <h2 id="dlg-h">Log in (demo)</h2>
-        <p>Pick who you are acting as. You can switch at any time from the bar at the top.</p>
-        <ul>{DEMO_ACCOUNTS.map((a) => <li key={a.ss58}><button className="btn btn-quiet" onClick={() => onWallet(demoWallet(a))}>{a.role} · <span className="mono">{a.ss58.slice(0, 8)}…{a.ss58.slice(-6)}</span></button></li>)}</ul>
-        <button className="btn btn-quiet" onClick={onClose}>Cancel</button>
-      </div>
-    </div>
-  );
 
   return (
     <div className="dlg-back" role="dialog" aria-modal="true" aria-labelledby="dlg-h" onClick={onClose}>

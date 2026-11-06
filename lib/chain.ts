@@ -1,8 +1,8 @@
 import { calls } from "./api";
 import { words, wBig, wId, wBytes20, decodeString } from "./abi";
 
-/** `registry` is the contract's account as a 5… address. `demo` switches the app to a simulated chain (see lib/demo.ts). */
-export interface Config { registry?: string; wsUrl: string; nativeSymbol: string; nativeDecimals: number; ss58Format?: number; demo?: { repo: string } }
+/** `registry` is the contract's account as a 5… address. */
+export interface Config { registry?: string; wsUrl: string; nativeSymbol: string; nativeDecimals: number; ss58Format?: number }
 export interface MilestoneView { amount: bigint; status: number; approvals: number; commit: string; evidence: string; viewerVoted?: boolean }
 export interface GrantView {
   id: number; funder: string; token: string; recipient: string; total: bigint; released: bigint;

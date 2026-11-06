@@ -1,14 +1,14 @@
-// Demo mode: a stand-in for the MilestoneGrants contract that lives in this browser tab, so the whole flow can be shown
+// Demo mode (served at /demo, never imported by the real app at /): a stand-in for the MilestoneGrants contract that lives in this browser tab, so the whole flow can be shown
 // (fund, claim, approve, release, reclaim) with no node, no wallet and no deployment. Nothing leaves the page except the
 // GitHub commit lookup, which stays real.
 //
 // It speaks the same calldata as the real contract: the app encodes every call with lib/api.ts, this file decodes it,
 // applies the contract's rules and answers in the contract's return format, so the UI code path is the production one.
-import { SIG } from "./api";
-import { encodeParams, selectorOf, wId } from "./abi";
-import { bytesToBig, bytesToHex, hexToBytes } from "./hex";
-import type { ContractCall } from "./chain";
-import type { Session, Wallet } from "./wallet";
+import { SIG } from "../lib/api";
+import { encodeParams, selectorOf, wId } from "../lib/abi";
+import { bytesToBig, bytesToHex, hexToBytes } from "../lib/hex";
+import type { ContractCall } from "../lib/chain";
+import type { Session, Wallet } from "../lib/wallet";
 
 /** Stands in for the registry's 20-byte target in demo mode. */
 export const DEMO_REGISTRY = "0x" + "d0".repeat(20);

@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { calls } from "../lib/api";
 import { readGrant, readGrantCount } from "../lib/chain";
-import { DEMO_ACCOUNTS, demoCall, exec, initDemo, resetDemo } from "../lib/demo";
+import { DEMO_ACCOUNTS, demoCall, exec, initDemo, resetDemo } from "../demo/contract";
 
 const [alice, bob, charlie, dave, eve] = DEMO_ACCOUNTS.map((a) => a.id);
 const POT = 10n ** 18n, COMMIT = "0x" + "ab".repeat(20), ZERO = "0x" + "00".repeat(32);

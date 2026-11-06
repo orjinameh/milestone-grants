@@ -10,13 +10,13 @@
 import type { Config, ContractCall } from "./chain";
 
 
-export type LoginKind = "extension" | "keystore" | "both" | "info" | "demo";
+export type LoginKind = "extension" | "keystore" | "both" | "info";
 /** What is kept in localStorage to restore a login after a refresh. Never holds a decrypted key or a password. */
-export interface Session { kind: LoginKind; address: string; name: string; ss58Format?: number; keystore?: any }
+export interface Session { kind: string; address: string; name: string; ss58Format?: number; keystore?: any }
 /** Asks the user for the keystore password; `attempt` throws on a wrong one so the dialog can show it and retry. */
 export type Unlocker = (attempt: (password: string) => void) => Promise<void>;
 /** `id` is the account's 32-byte AccountId32 as hex (the public key behind `ss58`); it is what the contract stores. */
-export interface Wallet { kind: LoginKind; name: string; ss58: string; id: string; session: Session; send(to: string, data: string, value?: string): Promise<string> }
+export interface Wallet { kind: string; name: string; ss58: string; id: string; session: Session; send(to: string, data: string, value?: string): Promise<string> }
 export interface AccountInfo { address?: string; name?: string; ss58Format?: number }
 export interface ParsedFile { kind: "keystore" | "info"; keystore?: any; info?: AccountInfo }
 
@@ -91,7 +91,7 @@ export function makeCall(cfg: Config): ContractCall {
 
 type Signer = { address: string; name: string; signer?: any; pair?: any; viewOnly?: boolean; unlock?: Unlocker };
 
-async function makeWallet(kind: LoginKind, who: Signer, cfg: Config, session: Session): Promise<Wallet> {
+async function makeWallet(kind: string, who: Signer, cfg: Config, session: Session): Promise<Wallet> {
   const id = await toAccountId(who.address);
   const send = async (to: string, data: string, value?: string) => {
     if (who.viewOnly) throw new Error("This is a view-only login (account info file only). Log in with the extension or a keystore file to sign.");

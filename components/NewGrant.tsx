@@ -2,14 +2,15 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { isAddress, isRepo, parseUnits, fmt, type Config } from "../lib/chain";
 import { Cross, Plus } from "./Icons";
-import { DEMO_ACCOUNTS } from "../lib/demo";
 
 export interface NewGrantParams { recipient: string; repo: string; amounts: string[]; reviewers: string[]; threshold: number; days: number; token: string }
-interface Props { cfg: Config; blocker: string | null; busy: boolean; onCreate: (p: NewGrantParams) => void }
+/** A ready-made grant the form can be filled with in one click. */
+export interface ExampleGrant { recipient: string; repo: string; amounts: string[]; reviewers: string[]; threshold: number; days: number }
+interface Props { cfg: Config; blocker: string | null; busy: boolean; onCreate: (p: NewGrantParams) => void; allowToken: boolean; example?: ExampleGrant }
 
 const DAY_CHOICES = [7, 14, 30, 60];
 
-export default function NewGrant({ cfg, blocker, busy, onCreate }: Props) {
+export default function NewGrant({ cfg, blocker, busy, onCreate, allowToken, example }: Props) {
   const [recipient, setRecipient] = useState("");
   const [repo, setRepo] = useState("");
   const [amounts, setAmounts] = useState<string[]>(["", ""]);
@@ -43,16 +44,17 @@ export default function NewGrant({ cfg, blocker, busy, onCreate }: Props) {
     if (reason) return;
     onCreate({ recipient: recipient.trim(), repo: repo.trim(), amounts: parsed, reviewers, threshold: t, days, token: token.trim() });
   };
-  const fillDemo = () => { // demo mode only: one click fills a sensible grant
-    const [, builder, ...panel] = DEMO_ACCOUNTS;
-    setRecipient(builder.ss58); setRepo(cfg.demo?.repo ?? ""); setAmounts(["1", "2"]); setReviewers(panel.map((a) => a.ss58)); setThreshold(2); setDays(14); setToken("");
+  const fillExample = () => {
+    if (!example) return;
+    setRecipient(example.recipient); setRepo(example.repo); setAmounts(example.amounts); setReviewers(example.reviewers);
+    setThreshold(example.threshold); setDays(example.days); setToken("");
   };
   const reclaimOn = new Date(Date.now() + days * 86400000).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 
   return (
     <form className="panel" onSubmit={submit} id="new" noValidate>
       <h2>New grant</h2>
-      {cfg.demo && <button type="button" className="btn btn-quiet" onClick={fillDemo}>Fill with demo accounts</button>}
+      {example && <button type="button" className="btn btn-quiet" onClick={fillExample}>Fill with an example</button>}
       <label>Who receives the funds
         <input className="mono" value={recipient} onChange={(e) => setRecipient(e.target.value)} placeholder="5…" spellCheck={false} aria-invalid={recipient !== "" && !isAddress(recipient)} />
       </label>
@@ -107,7 +109,7 @@ export default function NewGrant({ cfg, blocker, busy, onCreate }: Props) {
         <p className="hint">Anything not released by {reclaimOn} can be reclaimed by you.</p>
       </fieldset>
 
-      {!cfg.demo && <details className="more">
+      {allowToken && <details className="more">
         <summary>Pay in a token instead of {cfg.nativeSymbol}</summary>
         <label>Token contract address
           <input className="mono" value={token} onChange={(e) => setToken(e.target.value)} placeholder="Token contract 5… (leave empty for native POT)" spellCheck={false} />

@@ -14,7 +14,7 @@ flowchart TD
 
     D --> E[Grant and Milestone Workflows]
     E --> F[GitHub Commit Verification]
-    E --> G[Browser Demo Mode]
+    E --> G[Separate /demo route: in-tab simulation]
 
     E -. Pending integration .-> H[Contract Client]
     H -. Pending deployment .-> I[Portaldot V3 Revive]
@@ -29,7 +29,7 @@ flowchart TD
 1. **Frontend:** Provides the user interface for funders, builders and reviewers.
 2. **Grant and Milestone Workflows:** Handles grant creation, milestone claims and reviewer approvals.
 3. **GitHub Verification:** Checks submitted commit references against GitHub.
-4. **Demo Mode:** Provides a browser-based simulation of the grant lifecycle without requiring a deployed contract.
+4. **Demo (`/demo`):** A separate route with its own code that simulates the grant lifecycle in the browser without a deployed contract. The real app at `/` never imports it; both share only the screen (`components/GrantsApp.tsx`).
 5. **Smart Contract:** Implements grant and milestone funding logic in Solidity.
 6. **Portaldot Revive:** Intended blockchain execution environment for the smart contract.
 

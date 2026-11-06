@@ -31,35 +31,40 @@ The video demonstrates the MilestoneGrants prototype and its core grant lifecycl
 
 ## Web app (Next.js App Router, React, TypeScript)
 `app/`, `components/`, `public/config.json`; chain logic in `lib/`. Own dependency-free ABI encoder (`lib/abi.ts`, tested against the Solidity-docs vectors and
-cross-checked against ethers). Shows empty/offline states when no registry is configured or the node is unreachable; outside demo mode it never fakes data.
+cross-checked against ethers). Shows empty/offline states when no registry is configured or the node is unreachable; the real app never fakes data. The simulated chain is a separate route (`/demo`) with its own code.
 
 ## Run it
 ```bash
 npm install
-npm run dev                      # http://localhost:3000, starts in demo mode (see below)
+npm run dev                      # http://localhost:3000 is the real app, http://localhost:3000/demo is the demo (see below)
 
 npm run test:abi                 # ABI encoder vectors
 npm run test:demo                # the demo contract, driven through the app's own encoders
+npm run test:separation          # the real app contains and imports no demo code
 npm run crosscheck               # encoder == ethers for every UI call
 npm run compile && npm run test:contract   # contract tests, in-process, no network
 ```
 
-## Demo mode (no node, no wallet, no deployment)
-`public/config.json` ships with `"demo": { "repo": "owner/name" }`. In demo mode the app runs against a simulated copy of the
-contract that lives in the browser tab (`lib/demo.ts`). It is fed the same calldata the real contract takes and applies the same rules
-(ordered claims, one vote per reviewer, M-of-N release, reclaim after the deadline), so the UI code path is the production one.
-- A banner says it is a demo; "Reset demo" restores the seed data.
-- Log in as Funder, Builder or one of three Reviewers, and switch from the bar at the top.
+## Demo (`/demo`, no node, no wallet, no deployment)
+The demo is a separate route with its own code in `demo/` and `app/demo/`. The real app at `/` does not import it, bundle it or read its
+state (`npm run test:separation` enforces this). Both routes share only the screen, `components/GrantsApp.tsx`, which is driven by a small
+`Mode` object: the real one is built in `app/page.tsx`, the demo one in `demo/mode.tsx`.
+
+In the demo the app runs against a simulated copy of the contract that lives in the browser tab (`demo/contract.ts`). It is fed the same
+calldata the real contract takes and applies the same rules (ordered claims, one vote per reviewer, M-of-N release, reclaim after the
+deadline), so the UI code path is the production one.
+- A banner says it is a demo and links to the real app; "Reset demo" restores the seed data.
+- Log in as Funder, Builder or one of three Reviewers, and switch from the bar at the top. The demo login is stored under its own key (`mg-demo-session`) and never becomes a real login.
 - Two grants are seeded: one fresh (the Builder claims milestone 1) and one past its deadline (the Funder reclaims).
-- "Fill with demo accounts" on the New grant form fills a ready grant.
-- The GitHub commit check is real. Set `demo.repo` to your repository and claim with one of its real commit SHAs.
-- Paying in a token is not available in demo mode.
+- "Fill with an example" on the New grant form fills a ready grant.
+- The GitHub commit check is real. Set `DEMO_REPO` in `demo/repo.ts` to your repository and claim with one of its real commit SHAs.
+- Paying in a token is not available in the demo.
 
 ## Deploy to the Portaldot V3 testnet
 Everything is native: a Substrate account signs, reads are `reviveApi.call` dry runs, writes are `revive.call` extrinsics.
 ```bash
 npm run compile
-KEYSTORE_FILE=./my-account.json npm run deploy:portaldot   # prints the cost, asks to confirm, then sets "registry" in public/config.json and turns demo mode off
+KEYSTORE_FILE=./my-account.json npm run deploy:portaldot   # prints the cost, asks to confirm, then sets "registry" in public/config.json
 npm run dev
 ```
 `public/config.json`: `wsUrl` (`wss://test-node-v3.portaldot.dev`), `registry` (the contract's account as a `5…` address), `nativeSymbol`, `nativeDecimals`, `ss58Format`.

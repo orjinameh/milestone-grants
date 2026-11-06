@@ -10,6 +10,7 @@
     "start": "next start",
     "test:abi": "tsx --test test/abi.test.ts",
     "test:demo": "tsx --test test/demo.test.ts",
+    "test:separation": "tsx --test test/separation.test.ts",
     "crosscheck": "tsx scripts/crosscheck.ts",
     "compile": "hardhat compile",
     "test:contract": "hardhat test",

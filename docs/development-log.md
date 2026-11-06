@@ -61,3 +61,8 @@ The team has requested testnet funding assistance from Portaldot administrators 
 ## Development Evidence
 
 The complete development history is publicly
+
+### Demo separated from the real app
+- Moved the simulated chain to `/demo` (`demo/`, `app/demo/`); the real app at `/` no longer contains demo code.
+- Extracted the shared screen into `components/GrantsApp.tsx`, driven by a `Mode` object. Demo and real logins use different storage keys.
+- Added `npm run test:separation` to keep the two apart.

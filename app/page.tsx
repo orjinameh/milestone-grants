@@ -1,198 +1,43 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { calls } from "../lib/api";
-import { fmt, isNative, parseUnits, readGrant, readGrantCount, short, type Config, type GrantView } from "../lib/chain";
-import { contractTarget, makeCall, registryTarget, restoreSession, toAccountId, type Session, type Unlocker, type Wallet } from "../lib/wallet";
-import { DEMO_ACCOUNTS, DEMO_REGISTRY, demoCall, demoWallet, initDemo, resetDemo, restoreDemo } from "../lib/demo";
+// The real app: reads and writes the deployed registry on Portaldot. It contains no simulated data.
+// The simulated chain is a separate route with its own code; the two share only the screen (components/GrantsApp.tsx).
+import { useEffect, useMemo, useState } from "react";
+import GrantsApp, { type Mode } from "../components/GrantsApp";
 import LoginDialog from "../components/LoginDialog";
-import UnlockDialog from "../components/UnlockDialog";
-import { buildBook, type Book } from "../lib/addressBook";
-import GrantTrack from "../components/GrantTrack";
-import NewGrant, { type NewGrantParams } from "../components/NewGrant";
-import { Mark } from "../components/Icons";
-import type { Run } from "../components/MilestoneDetail";
+import { makeCall, contractTarget, registryTarget, restoreSession } from "../lib/wallet";
+import type { Config } from "../lib/chain";
 
-type Toast = { text: string; tone: "ok" | "bad" | "info" } | null;
-type ListState = { kind: "loading" | "unconfigured" | "empty" | "error" | "ready"; text?: string };
-const ZERO32 = "0x" + "00".repeat(32); // native POT
 const SESSION_KEY = "mg-session";
+const LEGACY_KEY = "ext-account"; // written by early versions
+const KINDS = ["extension", "keystore", "both", "info"];
+
+function realMode(cfg: Config): Mode {
+  return {
+    cfg,
+    sessionKey: SESSION_KEY,
+    legacyKeys: [LEGACY_KEY],
+    read: makeCall(cfg),
+    registry: () => registryTarget(cfg),
+    tokenTarget: contractTarget,
+    restore: async (saved, unlock) => {
+      let s = saved;
+      if (!s) { try { const ext = localStorage.getItem(LEGACY_KEY); if (ext) s = { kind: "extension", address: ext, name: "Account" }; } catch {} }
+      if (!s || !KINDS.includes(s.kind)) return null;
+      return restoreSession(cfg, s, unlock);
+    },
+    Login: (p) => <LoginDialog cfg={cfg} {...p} />,
+    notReady: cfg.registry ? undefined : {
+      blocker: "The registry address is not set in public/config.json.",
+      help: <>No registry is connected yet. Deploy the contract and set <span className="mono">registry</span> (its 5… address) in <span className="mono">public/config.json</span>.</>,
+    },
+  };
+}
 
 export default function Page() {
   const [cfg, setCfg] = useState<Config | null>(null);
-  const [wallet, setWallet] = useState<Wallet | null>(null);
-  const [loginOpen, setLoginOpen] = useState(false);
-  const account = wallet?.id ?? null; // AccountId32 hex, what the contract stores
-  const [restoring, setRestoring] = useState(true);
-  const [book, setBook] = useState<Book>({});
-  const [unlockReq, setUnlockReq] = useState<{ attempt: (pw: string) => void; done: () => void; cancel: () => void } | null>(null);
-  const unlocker: Unlocker = useCallback((attempt) => new Promise<void>((resolve, reject) => {
-    setUnlockReq({ attempt, done: () => { setUnlockReq(null); resolve(); }, cancel: () => { setUnlockReq(null); reject(new Error("Signing cancelled.")); } });
-  }), []);
-  const setLogin = (w: Wallet) => { setWallet(w); try { localStorage.setItem(SESSION_KEY, JSON.stringify(w.session)); localStorage.removeItem("ext-account"); } catch {} };
-  const [copied, setCopied] = useState(false);
-  const copyAddress = async () => {
-    if (!wallet) return;
-    try { await navigator.clipboard.writeText(wallet.ss58); }
-    catch { // clipboard API unavailable (non-secure context, older mobile browsers)
-      const t = document.createElement("textarea"); t.value = wallet.ss58; t.style.position = "fixed"; t.style.opacity = "0";
-      document.body.appendChild(t); t.select(); try { document.execCommand("copy"); } catch {} document.body.removeChild(t);
-    }
-    setCopied(true); setTimeout(() => setCopied(false), 1800);
-  };
-  const logout = () => { setWallet(null); try { localStorage.removeItem(SESSION_KEY); localStorage.removeItem("ext-account"); } catch {} };
-  const chainOk = !!wallet;
-  const [grants, setGrants] = useState<GrantView[]>([]);
-  const [list, setList] = useState<ListState>({ kind: "loading" });
-  const [toast, setToast] = useState<Toast>(null);
-  const [busy, setBusy] = useState(false);
-  const [configErr, setConfigErr] = useState(false);
-  const now = Math.floor(Date.now() / 1000);
-
-  const say = useCallback((t: Toast) => { setToast(t); }, []);
-  useEffect(() => { if (toast?.tone === "ok") { const h = setTimeout(() => setToast(null), 6000); return () => clearTimeout(h); } }, [toast]);
-
-  useEffect(() => {
-    fetch("/config.json", { cache: "no-store" }).then((r) => r.json()).then(setCfg).catch(() => { setConfigErr(true); setRestoring(false); });
-  }, []);
-
-  useEffect(() => {
-    if (!cfg) return;
-    let saved: Session | null = null;
-    try {
-      const raw = localStorage.getItem(SESSION_KEY);
-      if (raw) saved = JSON.parse(raw);
-      else { const ext = localStorage.getItem("ext-account"); if (ext) saved = { kind: "extension", address: ext, name: "Account" }; } // sessions saved by older versions
-    } catch {}
-    if (!saved || !saved.address) { setRestoring(false); return; }
-    if (cfg.demo) { initDemo(cfg.demo.repo); const w = saved.kind === "demo" ? restoreDemo(saved) : null; if (w) setWallet(w); setRestoring(false); return; }
-    if (saved.kind === "demo") { setRestoring(false); return; }
-    void restoreSession(cfg, saved, unlocker).then((w) => { if (w) setWallet(w); setRestoring(false); });
-  }, [cfg, unlocker]);
-
-  const load = useCallback(async () => {
-    if (!cfg) return;
-    if (!cfg.demo && !cfg.registry) { setGrants([]); return setList({ kind: "unconfigured" }); }
-    try {
-      if (cfg.demo) initDemo(cfg.demo.repo);
-      const call = cfg.demo ? demoCall : makeCall(cfg);
-      const n = await readGrantCount(call);
-      if (n === 0) { setGrants([]); return setList({ kind: "empty" }); }
-      const ids: number[] = [];
-      for (let id = n - 1; id >= Math.max(0, n - 20); id--) ids.push(id);
-      const list = await Promise.all(ids.map((id) => readGrant(call, id, account)));
-      setBook(await buildBook(list.flatMap((g) => [g.funder, g.recipient, ...g.reviewers]), cfg.ss58Format ?? 42, wallet ? { id: wallet.id, ss58: wallet.ss58 } : undefined));
-      setGrants(list);
-      setList({ kind: "ready" });
-    } catch (e) {
-      setGrants([]);
-      setList({ kind: "error", text: (e as Error).message });
-    }
-  }, [cfg, account, wallet]);
-  useEffect(() => { void load(); }, [load]);
-
-  const run: Run = async (data, label) => {
-    if (!cfg) return;
-    say({ text: label.pending, tone: "info" });
-    try { await wallet!.send(cfg.demo ? DEMO_REGISTRY : await registryTarget(cfg), data); } catch (e) { say({ text: (e as Error).message, tone: "bad" }); throw e; }
-    say({ text: label.done, tone: "ok" });
-    await load();
-  };
-
-  const create = async (p: NewGrantParams) => {
-    if (!cfg) return;
-    setBusy(true);
-    try {
-      const amounts = p.amounts.map((a) => parseUnits(a, cfg.nativeDecimals));
-      const total = amounts.reduce((s, a) => s + BigInt(a), 0n).toString();
-      // Everything is a Substrate account: 5… addresses become the 32-byte ids the contract stores.
-      const funder = wallet!.id;
-      const recipient = await toAccountId(p.recipient);
-      const reviewers = await Promise.all(p.reviewers.map((r) => toAccountId(r)));
-      if (new Set(reviewers).size !== reviewers.length) throw new Error("Two of the reviewers are the same account.");
-      const token = p.token ? await toAccountId(p.token) : ZERO32;
-      const native = isNative(token);
-      const target = cfg.demo ? DEMO_REGISTRY : await registryTarget(cfg);
-      const tokenTarget = native ? "" : await contractTarget(p.token); // checked before anything is signed
-      const deadline = Math.floor(Date.now() / 1000) + p.days * 86400;
-      if (!native) {
-        say({ text: "Approve the token transfer (sign with your account)…", tone: "info" });
-        await wallet!.send(tokenTarget, calls.erc20Approve(target, total));
-      }
-      say({ text: "Sign the grant with your account…", tone: "info" });
-      await wallet!.send(target, calls.createGrant({ funder, token, recipient, deadline, threshold: p.threshold, repo: p.repo, reviewers, amounts }), native ? total : "0");
-      say({ text: "Grant funded.", tone: "ok" });
-      await load();
-    } catch (e) { say({ text: (e as Error).message, tone: "bad" }); }
-    setBusy(false);
-  };
-
-  const blocker = !cfg ? "Loading…" : !cfg.demo && !cfg.registry ? "The registry address is not set in public/config.json." : !wallet ? "Log in to fund a grant." : null;
-
-  const totals = useMemo(() => {
-    if (!cfg) return null;
-    const native = grants.filter((g) => isNative(g.token));
-    return { released: native.reduce((s, g) => s + g.released, 0n), count: grants.length };
-  }, [grants, cfg]);
-
-  return (
-    <>
-      <a className="skip" href="#grants">Skip to grants</a>
-      <header className="bar">
-        <div className="bar-in">
-          <span className="brand"><Mark /> Milestone Grants</span>
-          <nav className="bar-r" aria-label="Wallet">
-            <a className="bar-link" href="#new">New grant</a>
-            {wallet
-              ? <>{cfg?.demo
-                  ? <select className="who" aria-label="Acting as" value={wallet.ss58} onChange={(e) => { const a = DEMO_ACCOUNTS.find((x) => x.ss58 === e.target.value); if (a) setLogin(demoWallet(a)); }}>
-                      {DEMO_ACCOUNTS.map((a) => <option key={a.ss58} value={a.ss58}>{a.role} · {short(a.ss58)}</option>)}
-                    </select>
-                  : <span className="wallet" title={wallet.ss58}><i className="dot ok" />{short(wallet.ss58)}</span>}<button className="btn btn-quiet" onClick={copyAddress} aria-label="Copy wallet address">{copied ? "Copied" : "Copy"}</button><button className="btn btn-quiet" onClick={logout}>Log out</button></>
-              : <button className="btn" onClick={() => setLoginOpen(true)} disabled={!cfg || restoring}>{restoring ? "Restoring…" : "Log in"}</button>}
-          </nav>
-        </div>
-      </header>
-
-      {cfg?.demo && (
-        <div className="demo-bar" role="note">
-          <span><b>Demo mode.</b> A simulated Portaldot chain running in this tab. No node, wallet or POT is used, and nothing is sent anywhere. The GitHub commit check is live.</span>
-          <button className="btn btn-quiet" onClick={() => { resetDemo(cfg.demo!.repo); void load(); }}>Reset demo</button>
-        </div>
-      )}
-
-      <main>
-        <section className="hero">
-          <h1>Funds release when the commit is real.</h1>
-          <p className="lede">Fund a builder in milestones. Each one is claimed with a git commit, checked by reviewers you choose, and paid out on-chain as soon as enough of them approve.</p>
-          <ol className="how" aria-label="How a milestone is paid">
-            <li><span className="how-node" /><b>Builder anchors a commit</b><span>The commit hash is stored on-chain and checked against GitHub.</span></li>
-            <li><span className="how-node" /><b>Reviewers approve</b><span>You set how many of them must agree.</span></li>
-            <li><span className="how-node on" /><b>Funds are released</b><span>The contract pays the milestone automatically.</span></li>
-          </ol>
-        </section>
-
-        <div className="cols">
-          <section id="grants" aria-labelledby="grants-h">
-            <div className="sec-head">
-              <h2 id="grants-h">Grants</h2>
-              {list.kind === "ready" && totals && <p>{totals.count} on-chain, {fmt(totals.released, cfg!.nativeDecimals)} {cfg!.nativeSymbol} released</p>}
-            </div>
-            {configErr && <p className="empty bad">The app could not load its configuration (public/config.json).</p>}
-            {list.kind === "loading" && !configErr && <p className="empty">Reading grants from the chain…</p>}
-            {list.kind === "unconfigured" && <p className="empty">No registry is connected yet. Deploy the contract and set <span className="mono">registry</span> (its 5… address) in <span className="mono">public/config.json</span>.</p>}
-            {list.kind === "empty" && <p className="empty">No grants yet. Fund the first one with the form.</p>}
-            {list.kind === "error" && <p className="empty bad">Could not read the chain: {list.text}. Check <span className="mono">wsUrl</span> and <span className="mono">registry</span> in <span className="mono">public/config.json</span>.</p>}
-            {cfg && grants.map((g) => <GrantTrack key={g.id} g={g} symbol={cfg.nativeSymbol} decimals={cfg.nativeDecimals} account={account} now={now} run={run} book={book} />)}
-          </section>
-          <aside>{cfg && <NewGrant cfg={cfg} blocker={blocker} busy={busy} onCreate={create} />}</aside>
-        </div>
-      </main>
-
-      {loginOpen && cfg && <LoginDialog cfg={cfg} onClose={() => setLoginOpen(false)} onWallet={(w) => { setLogin(w); setLoginOpen(false); }} />}
-      {unlockReq && <UnlockDialog attempt={unlockReq.attempt} onDone={unlockReq.done} onCancel={unlockReq.cancel} />}
-      <div className="toast-zone" aria-live="polite">
-        {toast && <p className={`toast toast-${toast.tone}`}>{toast.text}<button className="icon" aria-label="Dismiss" onClick={() => setToast(null)}>×</button></p>}
-      </div>
-    </>
-  );
+  const [err, setErr] = useState(false);
+  useEffect(() => { fetch("/config.json", { cache: "no-store" }).then((r) => r.json()).then(setCfg).catch(() => setErr(true)); }, []);
+  const mode = useMemo(() => (cfg ? realMode(cfg) : null), [cfg]);
+  if (mode) return <GrantsApp mode={mode} />;
+  return <main><p className="empty">{err ? "The app could not load its configuration (public/config.json)." : "Loading…"}</p></main>;
 }
