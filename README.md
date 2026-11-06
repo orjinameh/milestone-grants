@@ -15,6 +15,12 @@ commit message, author and whether it was authored *before or after* the grant w
 
 See [Product Architecture](docs/architecture.md) for the system overview, components and deployment status.
 
+## Demo Video
+
+[Watch the MilestoneGrants Demo](https://youtu.be/jUMyjCzC1kg)
+
+The video demonstrates the MilestoneGrants prototype and its core grant lifecycle.
+
 ## Contract: `contracts/MilestoneGrants.sol`
 - `createGrant(CreateParams)` payable — native or ERC-20 (via `transferFrom`), accounts passed as 32-byte AccountId32 values, ≤10 reviewers, ≤10 milestones, M-of-N threshold
 - `claimMilestone(id, index, commit, evidence)` — recipient only, in order, before the deadline
@@ -61,6 +67,23 @@ npm run dev
 ## Login (Portaldot Substrate accounts, address starts with 5)
 Three ways in, all giving the same account type: browser extension (desktop, or Orion on mobile), keystore JSON + password, and the account info JSON alongside the keystore. Keys are decrypted in the browser only. Writes are signed as `revive.call` extrinsics (Portaldot V3 runs pallet-revive), after a `reviveApi.call` dry run for weight and deposit limits. A `5…` account acts on the contract as the address keccak256(publicKey)[12..].
 Recipients, reviewers and tokens are entered as `5…` addresses; the contract takes and returns them as 32-byte account ids (`bytes32`) and derives the 20-byte address its payments need with the same rule pallet-revive uses (Ethereum-derived accounts, including contracts, use the first 20 bytes; every other account uses the last 20 bytes of `keccak256(accountId)`). The funder id in `createGrant` is checked against the caller, so ids cannot be faked. The app never shows or accepts `0x…` addresses. A token is entered as the `5…` form of its contract account.
+
+## Portaldot V3 Testnet Deployment Status
+
+Network: Portaldot V3 Testnet
+Chain ID: 420420777
+RPC: https://test-evm-rpc-v3.portaldot.dev
+WebSocket: wss://test-node-v3.portaldot.dev
+
+Status: Contract deployment pending.
+
+The contract compiles successfully, but the initial instantiation attempt failed during the dry run with error `0x17000000`. No deployment transaction was submitted, so a contract address and transaction hash are not yet available.
+
+## Development History
+
+See [Development Log](docs/development-log.md) for a summary of implementation progress.
+
+[View complete GitHub commit history](https://github.com/orjinameh/milestone-grants/commits/main).
 
 ## Disclosure
 Runtime: Next.js and React only; the contract client has no third-party code. Dev tooling: Hardhat, ethers, TypeScript, tsx. Built with AI assistance (Claude).
