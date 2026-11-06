@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ComponentType, ReactNode } from "react";
 import { calls } from "../lib/api";
 import { fmt, isNative, parseUnits, readGrant, readGrantCount, short, type Config, type ContractCall, type GrantView } from "../lib/chain";
-import { revokeWalletAccess, toAccountId, type Session, type Unlocker, type Wallet } from "../lib/wallet";
+import { revokeWalletAccess, toAccountId, watchAccounts, type Session, type Unlocker, type Wallet } from "../lib/wallet";
 import UnlockDialog from "./UnlockDialog";
 import { buildBook, type Book } from "../lib/addressBook";
 import GrantTrack from "./GrantTrack";
@@ -100,6 +100,17 @@ export default function GrantsApp({ mode }: { mode: Mode }) {
     });
     return () => { cancelled = true; };
   }, [mode, unlocker, logoutRequested]);
+
+  // Follow MetaMask: switching the active account there switches the app, no logout needed.
+  useEffect(() => {
+    if (!wallet || wallet.kind !== "metamask") return;
+    const current = wallet.ss58.toLowerCase();
+    return watchAccounts(cfg, (w) => {
+      if (!w) return logout();
+      if (w.ss58.toLowerCase() !== current) setLogin(w);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wallet?.ss58, wallet?.kind, cfg]);
 
   const load = useCallback(async () => {
     if (mode.notReady) { setGrants([]); return setList({ kind: "unconfigured" }); }

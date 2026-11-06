@@ -331,3 +331,20 @@ export async function revokeWalletAccess(): Promise<void> {
     if (injected) await injected.request({ method: "wallet_revokePermissions", params: [{ eth_accounts: {} }] });
   } catch { /* not supported or already revoked */ }
 }
+
+/** Calls onChange when the active MetaMask account changes (null = no account is shared any more). Returns an unsubscribe. */
+export function watchAccounts(cfg: Config, onChange: (w: Wallet | null) => void): () => void {
+  let stop = false;
+  let provider: any = null;
+  const handler = async (accounts: string[]) => {
+    if (stop) return;
+    if (!accounts?.length) return onChange(null);
+    try { const w = await createWallet(cfg, accounts[0], provider); if (!stop) onChange(w); } catch {}
+  };
+  void getMetaMask().then((p) => {
+    if (stop) return;
+    provider = p;
+    (p as any).on?.("accountsChanged", handler);
+  }).catch(() => {});
+  return () => { stop = true; try { provider?.removeListener?.("accountsChanged", handler); } catch {} };
+}
