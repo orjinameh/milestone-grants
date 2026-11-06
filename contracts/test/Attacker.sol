@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.24;
 
 interface IGrants {
     function approveMilestone(uint256 id, uint256 index) external;

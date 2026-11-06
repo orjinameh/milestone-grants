@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.24;
 
 interface IERC20Min {
     function transfer(address to, uint256 amount) external returns (bool);
     function transferFrom(address from, address to, uint256 amount) external returns (bool);
+}
+
+interface IERC20Balance {
+    function balanceOf(address account) external view returns (uint256);
 }
 
 /// @title MilestoneGrants
@@ -297,9 +301,19 @@ contract MilestoneGrants {
 
     function _pull(address token, address from, uint256 amount) private {
         if (token.code.length == 0) revert BadParams();
+
+        uint256 balanceBefore = IERC20Balance(token).balanceOf(address(this));
+
         (bool ok, bytes memory ret) =
             token.call(abi.encodeWithSelector(IERC20Min.transferFrom.selector, from, address(this), amount));
+
         if (!ok || (ret.length != 0 && !abi.decode(ret, (bool)))) revert TransferFailed();
+
+        uint256 balanceAfter = IERC20Balance(token).balanceOf(address(this));
+
+        if (balanceAfter < balanceBefore || balanceAfter - balanceBefore != amount) {
+            revert BadFunding();
+        }
     }
 
     function _pay(address token, address to, uint256 amount) private {

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.24;
 /// Test-only ERC-20 used by the Hardhat suite. Not deployed to Portaldot.
 contract TestToken {
     mapping(address => uint256) public balanceOf;

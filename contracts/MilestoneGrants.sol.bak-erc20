@@ -1,0 +1,315 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+interface IERC20Min {
+    function transfer(address to, uint256 amount) external returns (bool);
+    function transferFrom(address from, address to, uint256 amount) external returns (bool);
+}
+
+/// @title MilestoneGrants
+/// @notice Milestone-based grant escrow. A funder locks native POT or an ERC-20 against ordered milestones.
+///         The recipient claims a milestone by anchoring a git commit hash (a 20-byte SHA-1) plus an evidence
+///         URL; an M-of-N reviewer panel approves; when the threshold is reached the milestone's funds are
+///         released automatically. After the deadline the funder can reclaim anything not yet released.
+///
+///         Accounts are Substrate accounts. Every account (funder, recipient, reviewers, token) goes in and comes out
+///         as its 32-byte AccountId32 (the 5... address). The contract derives the 20-byte address the EVM layer needs
+///         from it with the same rule pallet-revive uses, so the two can never disagree: the funder id must belong to
+///         the caller, and every other id maps to exactly one payable address.
+contract MilestoneGrants {
+    enum Status { Pending, Claimed, Released }
+
+    struct Milestone {
+        uint128 amount;
+        Status status;
+        uint8 approvals;
+        bytes20 commit;
+        string evidence;
+    }
+
+    struct Grant {
+        address funder;
+        address token; // address(0) = native
+        address recipient;
+        bytes32 funderId;
+        bytes32 tokenId; // 0 = native
+        bytes32 recipientId;
+        uint128 total;
+        uint128 released;
+        uint64 createdAt;
+        uint64 deadline;
+        uint8 threshold;
+        bool closed;
+        string repo; // "owner/name" on GitHub, used by the UI to verify commits
+        address[] reviewers;
+        bytes32[] reviewerIds;
+        Milestone[] milestones;
+    }
+
+    struct CreateParams {
+        bytes32 funder; // the caller's own AccountId32
+        bytes32 token; // 0 = native POT, otherwise the token contract's account
+        bytes32 recipient;
+        uint64 deadline;
+        uint8 threshold;
+        string repo;
+        bytes32[] reviewers;
+        uint128[] amounts;
+    }
+
+    struct GrantInfo {
+        bytes32 funder;
+        bytes32 token;
+        bytes32 recipient;
+        uint128 total;
+        uint128 released;
+        uint64 createdAt;
+        uint64 deadline;
+        uint8 threshold;
+        bool closed;
+        uint8 reviewerCount;
+        uint8 milestoneCount;
+    }
+
+    struct MilestoneInfo {
+        uint128 amount;
+        uint8 status;
+        uint8 approvals;
+        bytes20 commit;
+    }
+
+    Grant[] private _grants;
+    mapping(uint256 => mapping(uint256 => mapping(address => bool))) private _voted;
+    uint256 private _lock = 1;
+
+    event GrantCreated(
+        uint256 indexed id, bytes32 indexed funder, bytes32 indexed recipient, bytes32 token,
+        uint256 total, uint64 deadline, string repo
+    );
+    event MilestoneClaimed(uint256 indexed id, uint256 indexed index, bytes20 commit, string evidence);
+    event MilestoneApproved(uint256 indexed id, uint256 indexed index, bytes32 indexed reviewer, uint8 approvals);
+    event MilestoneReleased(uint256 indexed id, uint256 indexed index, bytes32 indexed recipient, uint256 amount);
+    event GrantClosed(uint256 indexed id, uint256 refunded);
+
+    error BadParams();
+    error BadFunding();
+    error NoSuchGrant();
+    error NotRecipient();
+    error NotReviewer();
+    error NotFunder();
+    error Closed();
+    error PastDeadline();
+    error BeforeDeadline();
+    error OutOfOrder();
+    error BadStatus();
+    error AlreadyVoted();
+    error TransferFailed();
+    error Reentrancy();
+
+    modifier nonReentrant() {
+        if (_lock != 1) revert Reentrancy();
+        _lock = 2;
+        _;
+        _lock = 1;
+    }
+
+    function createGrant(CreateParams calldata p) external payable nonReentrant returns (uint256 id) {
+        uint256 total = _validate(p);
+        address token = p.token == bytes32(0) ? address(0) : _evm(p.token);
+
+        if (token == address(0)) {
+            if (msg.value != total) revert BadFunding();
+        } else {
+            if (msg.value != 0) revert BadFunding();
+            _pull(token, msg.sender, total);
+        }
+
+        id = _grants.length;
+        Grant storage g = _grants.push();
+        g.funder = msg.sender;
+        g.funderId = p.funder;
+        g.token = token;
+        g.tokenId = p.token;
+        g.recipient = _evm(p.recipient);
+        g.recipientId = p.recipient;
+        g.total = uint128(total);
+        g.createdAt = uint64(block.timestamp);
+        g.deadline = p.deadline;
+        g.threshold = p.threshold;
+        g.repo = p.repo;
+        for (uint256 i = 0; i < p.reviewers.length; i++) {
+            g.reviewers.push(_evm(p.reviewers[i]));
+            g.reviewerIds.push(p.reviewers[i]);
+        }
+        for (uint256 i = 0; i < p.amounts.length; i++) {
+            Milestone storage m = g.milestones.push();
+            m.amount = p.amounts[i];
+        }
+        emit GrantCreated(id, p.funder, p.recipient, p.token, total, p.deadline, p.repo);
+    }
+
+    function _validate(CreateParams calldata p) private view returns (uint256 total) {
+        uint256 nr = p.reviewers.length;
+        uint256 nm = p.amounts.length;
+        if (p.recipient == bytes32(0)) revert BadParams();
+        if (_evm(p.funder) != msg.sender) revert BadParams(); // the funder id must be the caller's own account
+        if (nr == 0 || nr > 10 || p.threshold == 0 || p.threshold > nr) revert BadParams();
+        if (nm == 0 || nm > 10) revert BadParams();
+        if (p.deadline <= block.timestamp) revert BadParams();
+
+        for (uint256 i = 0; i < nr; i++) {
+            if (p.reviewers[i] == bytes32(0)) revert BadParams();
+            for (uint256 j = i + 1; j < nr; j++) {
+                if (p.reviewers[i] == p.reviewers[j]) revert BadParams();
+            }
+        }
+        for (uint256 i = 0; i < nm; i++) {
+            if (p.amounts[i] == 0) revert BadParams();
+            total += p.amounts[i];
+        }
+        if (total > type(uint128).max) revert BadParams();
+    }
+
+    /// @notice Recipient claims the next milestone by anchoring the git commit that delivers it.
+    function claimMilestone(uint256 id, uint256 index, bytes20 commit, string calldata evidence)
+        external
+        nonReentrant
+    {
+        Grant storage g = _grant(id);
+        if (msg.sender != g.recipient) revert NotRecipient();
+        if (g.closed) revert Closed();
+        if (block.timestamp > g.deadline) revert PastDeadline();
+        if (index >= g.milestones.length) revert BadParams();
+        if (index > 0 && g.milestones[index - 1].status != Status.Released) revert OutOfOrder();
+        Milestone storage m = g.milestones[index];
+        if (m.status != Status.Pending) revert BadStatus();
+        if (commit == bytes20(0)) revert BadParams();
+        m.status = Status.Claimed;
+        m.commit = commit;
+        m.evidence = evidence;
+        emit MilestoneClaimed(id, index, commit, evidence);
+    }
+
+    /// @notice A reviewer approves a claimed milestone; reaching the threshold releases the funds.
+    function approveMilestone(uint256 id, uint256 index) external nonReentrant {
+        Grant storage g = _grant(id);
+        if (g.closed) revert Closed();
+        (bool isReviewer, uint256 ri) = _reviewerIndex(g, msg.sender);
+        if (!isReviewer) revert NotReviewer();
+        if (index >= g.milestones.length) revert BadParams();
+        Milestone storage m = g.milestones[index];
+        if (m.status != Status.Claimed) revert BadStatus();
+        if (_voted[id][index][msg.sender]) revert AlreadyVoted();
+        _voted[id][index][msg.sender] = true;
+        m.approvals += 1;
+        emit MilestoneApproved(id, index, g.reviewerIds[ri], m.approvals);
+        if (m.approvals >= g.threshold) {
+            m.status = Status.Released;
+            g.released += m.amount;
+            emit MilestoneReleased(id, index, g.recipientId, m.amount);
+            _pay(g.token, g.recipient, m.amount);
+        }
+    }
+
+    /// @notice After the deadline the funder reclaims everything not yet released and closes the grant.
+    function reclaim(uint256 id) external nonReentrant {
+        Grant storage g = _grant(id);
+        if (msg.sender != g.funder) revert NotFunder();
+        if (g.closed) revert Closed();
+        if (block.timestamp <= g.deadline) revert BeforeDeadline();
+        g.closed = true;
+        uint256 refund = uint256(g.total) - uint256(g.released);
+        emit GrantClosed(id, refund);
+        if (refund > 0) _pay(g.token, g.funder, refund);
+    }
+
+    // ----------------------------------------------------------------- views
+    function grantCount() external view returns (uint256) {
+        return _grants.length;
+    }
+
+    function grantInfo(uint256 id) external view returns (GrantInfo memory r) {
+        Grant storage g = _grant(id);
+        r.funder = g.funderId;
+        r.token = g.tokenId;
+        r.recipient = g.recipientId;
+        r.total = g.total;
+        r.released = g.released;
+        r.createdAt = g.createdAt;
+        r.deadline = g.deadline;
+        r.threshold = g.threshold;
+        r.closed = g.closed;
+        r.reviewerCount = uint8(g.reviewers.length);
+        r.milestoneCount = uint8(g.milestones.length);
+    }
+
+    function milestoneInfo(uint256 id, uint256 index) external view returns (MilestoneInfo memory r) {
+        Grant storage g = _grant(id);
+        if (index >= g.milestones.length) revert BadParams();
+        Milestone storage m = g.milestones[index];
+        r.amount = m.amount;
+        r.status = uint8(m.status);
+        r.approvals = m.approvals;
+        r.commit = m.commit;
+    }
+
+    function reviewerAt(uint256 id, uint256 index) external view returns (bytes32) {
+        Grant storage g = _grant(id);
+        if (index >= g.reviewerIds.length) revert BadParams();
+        return g.reviewerIds[index];
+    }
+
+    function hasVoted(uint256 id, uint256 index, bytes32 who) external view returns (bool) {
+        return _voted[id][index][_evm(who)];
+    }
+
+    function repoOf(uint256 id) external view returns (string memory) {
+        return _grant(id).repo;
+    }
+
+    function evidenceOf(uint256 id, uint256 index) external view returns (string memory) {
+        Grant storage g = _grant(id);
+        if (index >= g.milestones.length) revert BadParams();
+        return g.milestones[index].evidence;
+    }
+
+    // -------------------------------------------------------------- internals
+    function _grant(uint256 id) private view returns (Grant storage) {
+        if (id >= _grants.length) revert NoSuchGrant();
+        return _grants[id];
+    }
+
+    function _reviewerIndex(Grant storage g, address who) private view returns (bool, uint256) {
+        uint256 n = g.reviewers.length;
+        for (uint256 i = 0; i < n; i++) {
+            if (g.reviewers[i] == who) return (true, i);
+        }
+        return (false, 0);
+    }
+
+    /// @dev The 20-byte address pallet-revive's default mapper gives an AccountId32: accounts derived from an
+    ///      Ethereum address (last 12 bytes all 0xEE, which includes every contract) use the first 20 bytes,
+    ///      every other account uses the last 20 bytes of keccak256(accountId).
+    function _evm(bytes32 id) private pure returns (address) {
+        if (uint96(uint256(id)) == 0xEEEEEEEEEEEEEEEEEEEEEEEE) return address(bytes20(id));
+        return address(uint160(uint256(keccak256(abi.encodePacked(id)))));
+    }
+
+    function _pull(address token, address from, uint256 amount) private {
+        if (token.code.length == 0) revert BadParams();
+        (bool ok, bytes memory ret) =
+            token.call(abi.encodeWithSelector(IERC20Min.transferFrom.selector, from, address(this), amount));
+        if (!ok || (ret.length != 0 && !abi.decode(ret, (bool)))) revert TransferFailed();
+    }
+
+    function _pay(address token, address to, uint256 amount) private {
+        if (token == address(0)) {
+            (bool ok,) = to.call{value: amount}("");
+            if (!ok) revert TransferFailed();
+        } else {
+            (bool ok, bytes memory ret) =
+                token.call(abi.encodeWithSelector(IERC20Min.transfer.selector, to, amount));
+            if (!ok || (ret.length != 0 && !abi.decode(ret, (bool)))) revert TransferFailed();
+        }
+    }
+}

@@ -77,6 +77,18 @@ describe("MilestoneGrants", () => {
     await expect(g.connect(funder).reclaim(0)).to.changeEtherBalance(funder, eth(2));
     await expect(g.connect(recipient).claimMilestone(0, 1, COMMIT, "")).to.be.revertedWithCustomError(g, "Closed");
   });
+  it("rejects fee-on-transfer ERC-20 funding that delivers less than requested", async () => {
+    const T = await (await ethers.getContractFactory("FeeOnTransferToken")).deploy();
+    await T.mint(funder.address, eth(10));
+    await T.approve(await g.getAddress(), eth(3));
+
+    await expect(
+      g.createGrant({ ...p, token: id(await T.getAddress()) })
+    ).to.be.revertedWithCustomError(g, "BadFunding");
+
+    expect(await T.balanceOf(await g.getAddress())).to.equal(0n);
+  });
+
   it("ERC-20 grants via an ERC-20 mock", async () => {
     const T = await (await ethers.getContractFactory("TestToken")).deploy();
     await T.mint(funder.address, eth(10)); await T.approve(await g.getAddress(), eth(3));
