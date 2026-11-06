@@ -271,6 +271,8 @@ export async function loginMetaMask(cfg: Config): Promise<Wallet> {
     await provider.request({ method: "wallet_requestPermissions", params: [{ eth_accounts: {} }] });
   } catch (e: any) {
     if (e?.code === 4001) throw new Error("The wallet connection was declined.");
+    if (e?.code === -32002) throw new Error("MetaMask already has a connection request open. Click the MetaMask icon, finish or reject it, then try again.");
+    console.warn("wallet_requestPermissions failed:", e);
     // Provider without wallet_requestPermissions (some mobile wallets): fall back to eth_requestAccounts below.
   }
 
