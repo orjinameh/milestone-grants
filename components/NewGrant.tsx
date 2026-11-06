@@ -6,11 +6,11 @@ import { Cross, Plus } from "./Icons";
 export interface NewGrantParams { recipient: string; repo: string; amounts: string[]; reviewers: string[]; threshold: number; days: number; token: string }
 /** A ready-made grant the form can be filled with in one click. */
 export interface ExampleGrant { recipient: string; repo: string; amounts: string[]; reviewers: string[]; threshold: number; days: number }
-interface Props { cfg: Config; blocker: string | null; busy: boolean; onCreate: (p: NewGrantParams) => void; allowToken: boolean; example?: ExampleGrant }
+interface Props { cfg: Config; blocker: string | null; busy: boolean; onCreate: (p: NewGrantParams) => void; allowToken: boolean; funderAddress: string | null; example?: ExampleGrant }
 
 const DAY_CHOICES = [7, 14, 30, 60];
 
-export default function NewGrant({ cfg, blocker, busy, onCreate, allowToken, example }: Props) {
+export default function NewGrant({ cfg, blocker, busy, onCreate, allowToken, funderAddress, example }: Props) {
   const [recipient, setRecipient] = useState("");
   const [repo, setRepo] = useState("");
   const [amounts, setAmounts] = useState<string[]>(["", ""]);
@@ -25,9 +25,21 @@ export default function NewGrant({ cfg, blocker, busy, onCreate, allowToken, exa
   const total = useMemo(() => parsed.reduce((s, a) => s + BigInt(parseUnits(a, cfg.nativeDecimals)), 0n), [parsed, cfg.nativeDecimals]);
   const t = Math.min(Math.max(1, threshold), Math.max(1, reviewers.length));
   const sym = token.trim() ? "token units" : cfg.nativeSymbol;
+  const funder = funderAddress?.toLowerCase() ?? "";
+  const recipientAddress = recipient.trim().toLowerCase();
+  const recipientIsFunder = !!funder && recipientAddress === funder;
+  const reviewerDraftError = !draft.trim() ? "" :
+    !isAddress(draft.trim()) ? "Enter a valid EVM address." :
+    draft.trim().toLowerCase() === funder ? "You cannot review your own grant." :
+    draft.trim().toLowerCase() === recipientAddress ? "The recipient cannot review their own grant." :
+    reviewers.some((r) => r.toLowerCase() === draft.trim().toLowerCase()) ? "This reviewer has already been added." :
+    reviewers.length >= 10 ? "Maximum 10 reviewers." : "";
 
   const problems: string[] = [];
   if (!isAddress(recipient)) problems.push("Add a valid EVM address (starts with 0x).");
+  else if (recipientIsFunder) problems.push("You cannot create a grant for your own wallet.");
+  if (reviewers.some((r) => r.toLowerCase() === funder)) problems.push("Remove yourself from the reviewer list.");
+  if (reviewers.some((r) => r.toLowerCase() === recipientAddress)) problems.push("The recipient cannot be a reviewer.");
   if (!isRepo(repo)) problems.push("Add the GitHub repo as owner/name.");
   if (!parsed.length || parsed.length !== amounts.filter((a) => a.trim()).length) problems.push("Add at least one valid milestone amount.");
   if (!reviewers.length) problems.push("Add at least one reviewer.");
@@ -36,7 +48,7 @@ export default function NewGrant({ cfg, blocker, busy, onCreate, allowToken, exa
 
   const addReviewer = () => {
     const v = draft.trim();
-    if (!isAddress(v) || reviewers.some((r) => r.toLowerCase() === v.toLowerCase()) || reviewers.length >= 10) return;
+    if (reviewerDraftError) return;
     setReviewers([...reviewers, v]); setDraft("");
   };
   const submit = (e: FormEvent) => {
@@ -59,6 +71,7 @@ export default function NewGrant({ cfg, blocker, busy, onCreate, allowToken, exa
         <input className="mono" value={recipient} onChange={(e) => setRecipient(e.target.value)} placeholder="0x..." spellCheck={false} aria-invalid={recipient !== "" && !isAddress(recipient)} />
       </label>
       {recipient !== "" && !isAddress(recipient) && <p className="field-err">Use an EVM address (starts with 0x).</p>}
+      {recipientIsFunder && <p className="field-err">You cannot create a grant for your own wallet. Enter another recipient.</p>}
       <label>GitHub repository
         <input value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="owner/name" spellCheck={false} aria-invalid={repo !== "" && !isRepo(repo)} />
       </label>
@@ -88,8 +101,11 @@ export default function NewGrant({ cfg, blocker, busy, onCreate, allowToken, exa
         )}
         <div className="line">
           <input className="mono" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addReviewer(); } }} placeholder="Reviewer address 0x..." spellCheck={false} aria-label="Reviewer address" />
-          <button type="button" className="btn btn-quiet" onClick={addReviewer} disabled={!isAddress(draft)}>Add</button>
+          <button type="button" className="btn btn-quiet" onClick={addReviewer} disabled={!draft.trim() || !!reviewerDraftError}>Add</button>
         </div>
+        {reviewerDraftError && <p className="field-err">{reviewerDraftError}</p>}
+        {reviewers.some((r) => r.toLowerCase() === funder) && <p className="field-err">You cannot be a reviewer on your own grant. Remove your address.</p>}
+        {reviewers.some((r) => r.toLowerCase() === recipientAddress) && <p className="field-err">The recipient cannot review their own grant. Remove their address.</p>}
         {reviewers.length > 0 && (
           <div className="stepper" role="group" aria-label="Approvals needed">
             <button type="button" className="icon" aria-label="Fewer approvals" onClick={() => setThreshold(Math.max(1, t - 1))} disabled={t <= 1}>−</button>

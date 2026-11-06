@@ -50,6 +50,20 @@ describe("MilestoneGrants", () => {
     await expect(g.createGrant({ ...p, reviewers: [id(r1.address), id(r1.address), id(r2.address)] }, { value: eth(3) })).to.be.revertedWithCustomError(g, "BadParams");
     await expect(g.createGrant({ ...p, amounts: [0n] }, { value: 0 })).to.be.revertedWithCustomError(g, "BadParams");
   });
+  it("rejects the funder or recipient as grant recipient/reviewer", async () => {
+    await expect(
+      g.connect(funder).createGrant({ ...p, recipient: id(funder.address) }, { value: eth(3) })
+    ).to.be.revertedWithCustomError(g, "BadParams");
+
+    await expect(
+      g.connect(funder).createGrant({ ...p, reviewers: [id(funder.address), id(r2.address)] }, { value: eth(3) })
+    ).to.be.revertedWithCustomError(g, "BadParams");
+
+    await expect(
+      g.connect(funder).createGrant({ ...p, reviewers: [id(recipient.address), id(r2.address)] }, { value: eth(3) })
+    ).to.be.revertedWithCustomError(g, "BadParams");
+  });
+
   it("the funder id must belong to the caller", async () => {
     await expect(g.connect(other).createGrant(p, { value: eth(3) })).to.be.revertedWithCustomError(g, "BadParams");
     await expect(g.createGrant({ ...p, funder: id(other.address) }, { value: eth(3) })).to.be.revertedWithCustomError(g, "BadParams");

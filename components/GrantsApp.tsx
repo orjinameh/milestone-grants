@@ -52,12 +52,13 @@ export default function GrantsApp({ mode }: { mode: Mode }) {
   const [loginOpen, setLoginOpen] = useState(false);
   const account = wallet?.id ?? null; // AccountId32 hex, what the contract stores
   const [restoring, setRestoring] = useState(true);
+  const [logoutRequested, setLogoutRequested] = useState(() => { try { return sessionStorage.getItem("mg-logout") === "1"; } catch { return false; } });
   const [book, setBook] = useState<Book>({});
   const [unlockReq, setUnlockReq] = useState<{ attempt: (pw: string) => void; done: () => void; cancel: () => void } | null>(null);
   const unlocker: Unlocker = useCallback((attempt) => new Promise<void>((resolve, reject) => {
     setUnlockReq({ attempt, done: () => { setUnlockReq(null); resolve(); }, cancel: () => { setUnlockReq(null); reject(new Error("Signing cancelled.")); } });
   }), []);
-  const setLogin = (w: Wallet) => { setWallet(w); try { localStorage.setItem(mode.sessionKey, JSON.stringify(w.session)); mode.legacyKeys?.forEach((k) => localStorage.removeItem(k)); } catch {} };
+  const setLogin = (w: Wallet) => { setLogoutRequested(false); try { sessionStorage.removeItem("mg-logout"); localStorage.setItem(mode.sessionKey, JSON.stringify(w.session)); mode.legacyKeys?.forEach((k) => localStorage.removeItem(k)); } catch {} setWallet(w); };
   const [copied, setCopied] = useState(false);
   const copyAddress = async () => {
     if (!wallet) return;
@@ -68,7 +69,7 @@ export default function GrantsApp({ mode }: { mode: Mode }) {
     }
     setCopied(true); setTimeout(() => setCopied(false), 1800);
   };
-  const logout = () => { setWallet(null); try { localStorage.removeItem(mode.sessionKey); mode.legacyKeys?.forEach((k) => localStorage.removeItem(k)); } catch {} };
+  const logout = () => { setLogoutRequested(true); setWallet(null); setLoginOpen(false); try { sessionStorage.setItem("mg-logout", "1"); localStorage.removeItem(mode.sessionKey); mode.legacyKeys?.forEach((k) => localStorage.removeItem(k)); } catch {} };
   const chainOk = !!wallet;
   const [activated, setActivated] = useState<boolean | null>(null);
   const [grants, setGrants] = useState<GrantView[]>([]);
@@ -82,11 +83,23 @@ export default function GrantsApp({ mode }: { mode: Mode }) {
 
   useEffect(() => {
     mode.init?.();
+    if (logoutRequested) {
+      setRestoring(false);
+      return;
+    }
+    let cancelled = false;
     let saved: Session | null = null;
     try { const raw = localStorage.getItem(mode.sessionKey); if (raw) saved = JSON.parse(raw); } catch {}
     if (saved && !saved.address) saved = null;
-    void mode.restore(saved, unlocker).then((w) => { if (w) setWallet(w); setRestoring(false); });
-  }, [mode, unlocker]);
+    void mode.restore(saved, unlocker).then((w) => {
+      if (cancelled) return;
+      if (w) setWallet(w);
+      setRestoring(false);
+    }).catch(() => {
+      if (!cancelled) setRestoring(false);
+    });
+    return () => { cancelled = true; };
+  }, [mode, unlocker, logoutRequested]);
 
   const load = useCallback(async () => {
     if (mode.notReady) { setGrants([]); return setList({ kind: "unconfigured" }); }
@@ -128,6 +141,12 @@ export default function GrantsApp({ mode }: { mode: Mode }) {
   const create = async (p: NewGrantParams) => {
     setBusy(true);
     try {
+      const funderAddress = wallet!.ss58.toLowerCase();
+      const recipientAddress = p.recipient.trim().toLowerCase();
+      if (recipientAddress === funderAddress) throw new Error("You cannot create a grant for your own wallet.");
+      if (p.reviewers.some((r) => r.trim().toLowerCase() === funderAddress)) throw new Error("You cannot be a reviewer on your own grant.");
+      if (p.reviewers.some((r) => r.trim().toLowerCase() === recipientAddress)) throw new Error("The recipient cannot review their own grant.");
+      if (new Set(p.reviewers.map((r) => r.trim().toLowerCase())).size !== p.reviewers.length) throw new Error("Two of the reviewers are the same account.");
       const amounts = p.amounts.map((a) => parseUnits(a, cfg.nativeDecimals));
       const total = amounts.reduce((s, a) => s + BigInt(a), 0n).toString();
       // Everything is a Substrate account: 5… addresses become the 32-byte ids the contract stores.
@@ -210,7 +229,7 @@ export default function GrantsApp({ mode }: { mode: Mode }) {
             {list.kind === "error" && <p className="empty bad">Could not read the chain: {list.text}. Check <span className="mono">wsUrl</span> and <span className="mono">registry</span> in <span className="mono">public/config.json</span>.</p>}
             {grants.map((g) => <GrantTrack key={g.id} g={g} symbol={cfg.nativeSymbol} decimals={cfg.nativeDecimals} account={account} now={now} run={run} book={book} />)}
           </section>
-          <aside><NewGrant cfg={cfg} blocker={blocker} busy={busy} onCreate={create} allowToken={!!mode.tokenTarget} example={mode.example} /></aside>
+          <aside><NewGrant cfg={cfg} blocker={blocker} busy={busy} onCreate={create} allowToken={!!mode.tokenTarget} funderAddress={wallet?.ss58 ?? null} example={mode.example} /></aside>
         </div>
       </main>
 

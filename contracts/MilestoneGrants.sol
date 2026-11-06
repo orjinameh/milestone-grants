@@ -157,12 +157,16 @@ contract MilestoneGrants {
         uint256 nm = p.amounts.length;
         if (p.recipient == bytes32(0)) revert BadParams();
         if (_evm(p.funder) != msg.sender) revert BadParams(); // the funder id must be the caller's own account
+        address recipient = _evm(p.recipient);
+        if (recipient == msg.sender) revert BadParams(); // funder cannot receive their own grant
         if (nr == 0 || nr > 10 || p.threshold == 0 || p.threshold > nr) revert BadParams();
         if (nm == 0 || nm > 10) revert BadParams();
         if (p.deadline <= block.timestamp) revert BadParams();
 
         for (uint256 i = 0; i < nr; i++) {
             if (p.reviewers[i] == bytes32(0)) revert BadParams();
+            address reviewer = _evm(p.reviewers[i]);
+            if (reviewer == msg.sender || reviewer == recipient) revert BadParams();
             for (uint256 j = i + 1; j < nr; j++) {
                 if (p.reviewers[i] == p.reviewers[j]) revert BadParams();
             }

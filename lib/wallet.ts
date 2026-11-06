@@ -1,12 +1,12 @@
 "use client";
 
 import {
-  BrowserProvider,
   JsonRpcProvider,
   getAddress,
   isAddress as ethersIsAddress,
 } from "ethers";
 import type { Config, ContractCall } from "./chain";
+import { createEVMClient } from "@metamask/connect-evm";
 
 export interface Session {
   kind: string;
@@ -38,22 +38,38 @@ declare global {
   }
 }
 
+let sdkInstance: Awaited<ReturnType<typeof createEVMClient>> | null = null;
+
 const CHAIN_ID = 420420777;
 const CHAIN_HEX = "0x190f1ca9";
 
-function getMetaMask(): Eip1193 {
-  if (typeof window === "undefined" || !window.ethereum) {
-    throw new Error("MetaMask was not detected. Open Milestone Grants inside the MetaMask mobile browser.");
+async function getMetaMask(): Promise<Eip1193> {
+  if (typeof window === "undefined") {
+    throw new Error("Wallet connection requires a browser.");
   }
 
-  const providers = window.ethereum.providers ?? [window.ethereum];
-  const metaMask = providers.find((p) => p.isMetaMask);
+  const providers = window.ethereum?.providers ??
+    (window.ethereum ? [window.ethereum] : []);
+  const injected = providers.find((p) => p.isMetaMask);
 
-  if (!metaMask) {
-    throw new Error("MetaMask provider not found. Open this website in MetaMask's browser.");
+  if (injected) return injected;
+
+  if (!sdkInstance) {
+    sdkInstance = await createEVMClient({
+      dapp: {
+        name: "Milestone Grants",
+        url: window.location.origin,
+      },
+      api: {
+        supportedNetworks: {
+          "0x190f1ca9": "https://test-evm-rpc-v3.portaldot.dev",
+          "0x7a69": "https://zany-space-train-v6v5xjjw9xqcx677-8545.app.github.dev/",
+        },
+      },
+    });
   }
 
-  return metaMask;
+  return sdkInstance.getProvider() as unknown as Eip1193;
 }
 
 function rpc(cfg: Config) {
@@ -172,23 +188,61 @@ async function createWallet(
       throw new Error("Your selected MetaMask account changed. Reconnect your wallet.");
     }
 
-    const browserProvider = new BrowserProvider(provider as any, "any");
-    const signer = await browserProvider.getSigner(normalized);
     const target = getAddress(to);
 
-    const tx = await signer.sendTransaction({
-      to: target,
-      data,
-      value: BigInt(value),
+    const txHash = await provider.request({
+      method: "eth_sendTransaction",
+      params: [{
+        from: normalized,
+        to: target,
+        data,
+        value: `0x${BigInt(value).toString(16)}`,
+      }],
     });
 
-    const receipt = await tx.wait();
-
-    if (!receipt || receipt.status !== 1) {
-      throw new Error("The transaction failed on Portaldot.");
+    if (typeof txHash !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(txHash)) {
+      throw new Error("Wallet returned an invalid transaction hash.");
     }
 
-    return tx.hash;
+    let receipt: any = null;
+
+    for (let attempt = 0; attempt < 30; attempt++) {
+      try {
+        const response = await fetch(rpc(cfg), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            method: "eth_getTransactionReceipt",
+            params: [txHash],
+            id: 1,
+          }),
+          signal: AbortSignal.timeout(10000),
+        });
+
+        if (!response.ok) throw new Error(`RPC HTTP ${response.status}`);
+
+        const result = await response.json();
+        if (result.error) throw new Error(result.error.message || "RPC receipt error");
+
+        receipt = result.result;
+        if (receipt) break;
+      } catch (error) {
+        if (attempt === 29) throw error;
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+
+    if (!receipt) {
+      throw new Error(`Transaction ${txHash} was submitted, but its receipt could not be retrieved. Check the transaction before retrying.`);
+    }
+
+    if (receipt.status !== "0x1") {
+      throw new Error("The transaction was mined but failed on the network.");
+    }
+
+    return txHash;
   };
 
   const session: Session = {
@@ -208,7 +262,7 @@ async function createWallet(
 }
 
 export async function loginMetaMask(cfg: Config): Promise<Wallet> {
-  const provider = getMetaMask();
+  const provider = await getMetaMask();
 
   const accounts = await provider.request({
     method: "eth_requestAccounts",
@@ -230,7 +284,7 @@ export async function restoreSession(
   if (!session || session.kind !== "metamask") return null;
 
   try {
-    const provider = getMetaMask();
+    const provider = await getMetaMask();
     const accounts = await provider.request({ method: "eth_accounts" });
 
     const address = accounts?.find(
