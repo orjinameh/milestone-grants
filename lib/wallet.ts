@@ -43,6 +43,21 @@ let sdkInstance: Awaited<ReturnType<typeof createEVMClient>> | null = null;
 const CHAIN_ID = 420420777;
 const CHAIN_HEX = "0x190f1ca9";
 
+export function hasInjectedMetaMask(): boolean {
+  if (typeof window === "undefined") return false;
+  const w = window as any;
+  const list = w.ethereum?.providers ?? (w.ethereum ? [w.ethereum] : []);
+  return list.some((p: any) => p?.isMetaMask);
+}
+
+export function metaMaskAppLink(): string {
+  const host = typeof window === "undefined" ? "" : window.location.host;
+  return `https://metamask.app.link/dapp/${host}`;
+}
+
+const OPEN_IN_METAMASK =
+  "This browser can't send transactions. Open this page in the MetaMask app browser.";
+
 async function getMetaMask(): Promise<Eip1193> {
   if (typeof window === "undefined") {
     throw new Error("Wallet connection requires a browser.");
@@ -190,15 +205,23 @@ async function createWallet(
 
     const target = getAddress(to);
 
-    const txHash = await provider.request({
-      method: "eth_sendTransaction",
-      params: [{
-        from: normalized,
-        to: target,
-        data,
-        value: `0x${BigInt(value).toString(16)}`,
-      }],
-    });
+    let txHash: any;
+    try {
+      txHash = await provider.request({
+        method: "eth_sendTransaction",
+        params: [{
+          from: normalized,
+          to: target,
+          data,
+          value: `0x${BigInt(value).toString(16)}`,
+        }],
+      });
+    } catch (e: any) {
+      if (!hasInjectedMetaMask() && /must provide an Ethereum address/i.test(String(e?.message ?? ""))) {
+        throw new Error(OPEN_IN_METAMASK);
+      }
+      throw e;
+    }
 
     if (typeof txHash !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(txHash)) {
       throw new Error("Wallet returned an invalid transaction hash.");

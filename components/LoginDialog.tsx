@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Config } from "../lib/chain";
-import { loginMetaMask, type Wallet } from "../lib/wallet";
+import { hasInjectedMetaMask, loginMetaMask, metaMaskAppLink, type Wallet } from "../lib/wallet";
 
 export default function LoginDialog({
   cfg,
@@ -15,6 +15,8 @@ export default function LoginDialog({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [noInjected, setNoInjected] = useState(false);
+  useEffect(() => setNoInjected(!hasInjectedMetaMask()), []);
 
   const connect = async () => {
     setBusy(true);
@@ -38,6 +40,12 @@ export default function LoginDialog({
         <button className="btn" disabled={busy} onClick={connect}>
           {busy ? "Connecting…" : "Connect MetaMask"}
         </button>
+        {noInjected && (
+          <p className="hint">
+            On iPhone or iPad, use the MetaMask app browser.{" "}
+            <a href={metaMaskAppLink()}>Open in MetaMask</a>
+          </p>
+        )}
         {error && <p className="field-err" role="alert">{error}</p>}
         <button className="btn btn-quiet" onClick={onClose}>Cancel</button>
       </div>
