@@ -264,6 +264,16 @@ async function createWallet(
 export async function loginMetaMask(cfg: Config): Promise<Wallet> {
   const provider = await getMetaMask();
 
+  // eth_requestAccounts answers instantly when this site is already permitted in MetaMask. That looks like an
+  // automatic login after logout and never lets the user pick a different account. wallet_requestPermissions
+  // always opens MetaMask's account picker, so every login is a deliberate choice.
+  try {
+    await provider.request({ method: "wallet_requestPermissions", params: [{ eth_accounts: {} }] });
+  } catch (e: any) {
+    if (e?.code === 4001) throw new Error("The wallet connection was declined.");
+    // Provider without wallet_requestPermissions (some mobile wallets): fall back to eth_requestAccounts below.
+  }
+
   const accounts = await provider.request({
     method: "eth_requestAccounts",
   });
@@ -304,4 +314,18 @@ export async function isActivated(
   address: string,
 ): Promise<boolean | null> {
   return ethersIsAddress(address) ? true : false;
+}
+
+/**
+ * Logout: take this site's account access away in MetaMask, so nothing can silently reconnect.
+ * Uses only an already-injected MetaMask (never opens the mobile SDK). If the wallet does not support revoking,
+ * the site stays permitted there until the user disconnects it in MetaMask's connected-sites settings.
+ */
+export async function revokeWalletAccess(): Promise<void> {
+  try {
+    const w: any = typeof window === "undefined" ? undefined : (window as any);
+    const providers: any[] = w?.ethereum?.providers ?? (w?.ethereum ? [w.ethereum] : []);
+    const injected = providers.find((p) => p.isMetaMask);
+    if (injected) await injected.request({ method: "wallet_revokePermissions", params: [{ eth_accounts: {} }] });
+  } catch { /* not supported or already revoked */ }
 }

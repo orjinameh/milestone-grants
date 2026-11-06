@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ComponentType, ReactNode } from "react";
 import { calls } from "../lib/api";
 import { fmt, isNative, parseUnits, readGrant, readGrantCount, short, type Config, type ContractCall, type GrantView } from "../lib/chain";
-import { toAccountId, type Session, type Unlocker, type Wallet } from "../lib/wallet";
+import { revokeWalletAccess, toAccountId, type Session, type Unlocker, type Wallet } from "../lib/wallet";
 import UnlockDialog from "./UnlockDialog";
 import { buildBook, type Book } from "../lib/addressBook";
 import GrantTrack from "./GrantTrack";
@@ -69,7 +69,7 @@ export default function GrantsApp({ mode }: { mode: Mode }) {
     }
     setCopied(true); setTimeout(() => setCopied(false), 1800);
   };
-  const logout = () => { setLogoutRequested(true); setWallet(null); setLoginOpen(false); try { sessionStorage.setItem("mg-logout", "1"); localStorage.removeItem(mode.sessionKey); mode.legacyKeys?.forEach((k) => localStorage.removeItem(k)); } catch {} };
+  const logout = () => { void revokeWalletAccess(); setLogoutRequested(true); setWallet(null); setLoginOpen(false); try { sessionStorage.setItem("mg-logout", "1"); localStorage.removeItem(mode.sessionKey); mode.legacyKeys?.forEach((k) => localStorage.removeItem(k)); } catch {} };
   const chainOk = !!wallet;
   const [activated, setActivated] = useState<boolean | null>(null);
   const [grants, setGrants] = useState<GrantView[]>([]);
